@@ -538,7 +538,7 @@ function Today({ profile, checkin, runReady, symptoms, goForm, goCardio, openChe
           <Avatar name={profile.name || 'Jordan Diaz'} />
         </header>
 
-        <Card className="pf-scorecard rise" style={{ '--d': '.05s' }}>
+        <Card className={cx('pf-scorecard', `pf-scorecard--${readyTone}`, 'rise')} style={{ '--d': '.05s' }}>
           <div className="pf-scorecard__cap">RunReady Score</div>
           <ScoreRing value={runReady} size={196} thickness={15} tone={readyTone} />
           <Badge tone={readyTone} dot>{badgeText}</Badge>

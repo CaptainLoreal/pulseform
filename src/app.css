@@ -572,3 +572,48 @@ input[type=range].pf-range::-webkit-slider-thumb {
 
 .pf-stack { display: flex; flex-direction: column; gap: 0; }
 .pf-mt-card { margin-top: 14px; }
+
+/* ---------------------------------------------------------------
+   Design refinement pass
+   --------------------------------------------------------------- */
+
+/* Tonal glow behind the RunReady score ring */
+.pf-scorecard { position: relative; overflow: hidden; }
+.pf-scorecard::before {
+  content: ''; position: absolute; top: -22%; left: 50%; transform: translateX(-50%);
+  width: 320px; height: 320px; border-radius: 50%; filter: blur(44px); opacity: 0.55; z-index: 0;
+  pointer-events: none;
+}
+.pf-scorecard--ready::before   { background: radial-gradient(circle, rgba(0,147,133,0.20), transparent 70%); }
+.pf-scorecard--caution::before { background: radial-gradient(circle, rgba(224,152,46,0.20), transparent 70%); }
+.pf-scorecard--strain::before  { background: radial-gradient(circle, rgba(224,91,67,0.20), transparent 70%); }
+.pf-scorecard > * { position: relative; z-index: 1; }
+.pf-scorecard__cap { display: inline-flex; align-items: center; gap: 7px; }
+.pf-scorecard__cap::before {
+  content: ''; width: 6px; height: 6px; border-radius: 999px; background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(0,147,133,0.5); animation: pflive 2.4s infinite;
+}
+
+/* Tone accent stripe on the cardio / biomech breakdown cards */
+.pf-bd { position: relative; overflow: hidden; }
+.pf-bd::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+.pf-bd--ready::after   { background: var(--signal-ready); }
+.pf-bd--caution::after { background: var(--signal-caution); }
+.pf-bd--strain::after  { background: var(--signal-strain); }
+
+/* Active tab pill */
+.pf-tab { position: relative; }
+.pf-tab::before {
+  content: ''; position: absolute; top: 3px; left: 50%; transform: translateX(-50%) scale(0.7);
+  width: 54px; height: 30px; border-radius: 999px; background: var(--accent-soft);
+  opacity: 0; transition: opacity var(--duration-base) var(--ease-standard),
+                          transform var(--duration-base) var(--ease-out);
+}
+.pf-tab--on::before { opacity: 1; transform: translateX(-50%) scale(1); }
+.pf-tab svg, .pf-tab span { position: relative; z-index: 1; }
+
+/* Crisper card hairline + a touch more lift on the score/plan heroes */
+.pf-scorecard, .pf-bio-hero, .pf-plan-hero { box-shadow: var(--shadow-md); }
+
+/* Biomech hero numerals: keep the unit clear of the figure */
+.pf-bio-hero__val small { margin-left: 4px; }
