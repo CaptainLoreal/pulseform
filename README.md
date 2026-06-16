@@ -81,6 +81,15 @@ Required environment variables on the Vercel project:
 | `POSTGRES_URL` (or `DATABASE_URL`) | Postgres connection string — auto-set when you attach Vercel Postgres |
 | `SESSION_SECRET` | random string used to sign session cookies |
 | `MIGRATE_SECRET` | (optional) token to authorise `/api/migrate` |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web Push keypair (EC P-256, base64url) |
+| `VAPID_SUBJECT` | `mailto:` contact for push (e.g. `mailto:hello@pulseform.app`) |
+| `CRON_SECRET` | bearer token Vercel Cron sends to `/api/cron/daily-reminder` |
+
+**Notifications:** installable PWA (`manifest.webmanifest` + `sw.js`) with Web Push.
+A Vercel Cron (`vercel.json` → daily 06:00 UTC) hits `/api/cron/daily-reminder`,
+which pushes a check-in nudge to anyone who hasn't logged one that day. Users opt
+in from the **You → Daily check-in reminder** toggle. On iPhone, push requires the
+app be **Added to Home Screen** first (Apple PWA rule).
 
 After the DB is attached and env vars are set, apply the schema once:
 

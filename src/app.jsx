@@ -41,6 +41,54 @@ const fromApiCheckin = (c) => ({
   sleep: c.sleep, soreness: c.soreness, pain: c.pain, symptoms: c.symptoms, runReady: c.run_ready,
 });
 
+/* ---- Web Push helpers ---- */
+function urlB64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = () =>
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+
+async function getPushState() {
+  if (!pushSupported()) return isIOS() && !isStandalone() ? 'needs-install' : 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && (await reg.pushManager.getSubscription());
+    return sub ? 'on' : 'off';
+  } catch (e) { return 'off'; }
+}
+async function enablePush() {
+  if (!pushSupported()) return { ok: false, error: 'Not supported on this browser.' };
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return { ok: false, error: 'Notifications were blocked.' };
+  const reg = await navigator.serviceWorker.register('/sw.js');
+  await navigator.serviceWorker.ready;
+  const v = await api('/push/vapid');
+  if (!v.ok || !v.data.publicKey) return { ok: false, error: 'Server push isn’t configured yet.' };
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlB64ToUint8Array(v.data.publicKey),
+  });
+  const r = await api('/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+  return r.ok ? { ok: true } : { ok: false, error: r.data.error || 'Could not subscribe.' };
+}
+async function disablePush() {
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg && (await reg.pushManager.getSubscription());
+  if (sub) {
+    await api('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
+    await sub.unsubscribe();
+  }
+  return { ok: true };
+}
+
 /* ---- icons (Lucide-style outline paths) -------------------- */
 const ICON = {
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
@@ -758,6 +806,55 @@ function Plan({ runReady, onStart }) {
   );
 }
 
+/* ---- Notifications toggle (used on the You screen) ---- */
+function NotificationToggle() {
+  const [state, setState] = useState('loading');  // loading|on|off|denied|unsupported|needs-install
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  useEffect(() => { (async () => setState(await getPushState()))(); }, []);
+  const toggle = async () => {
+    if (busy) return;
+    setBusy(true); setMsg(null);
+    if (state === 'on') { await disablePush(); setState('off'); }
+    else {
+      const r = await enablePush();
+      if (r.ok) setState('on');
+      else { setState(Notification.permission === 'denied' ? 'denied' : 'off'); setMsg(r.error); }
+    }
+    setBusy(false);
+  };
+  const sendTest = async () => {
+    setMsg('Sending…');
+    const r = await api('/push/test', { method: 'POST' });
+    setMsg(r.ok ? 'Sent — check your notifications.' : (r.data.error || 'Could not send.'));
+  };
+  const label = {
+    loading: 'Checking…', on: 'On · 8:00 each morning', off: 'Off — tap to enable',
+    denied: 'Blocked in your browser settings', unsupported: 'Not supported on this browser',
+    'needs-install': 'Add to Home Screen first (iPhone)',
+  }[state];
+  const switchable = state === 'on' || state === 'off';
+  return (
+    <>
+      <div className="pf-list__row">
+        <span className="pf-list__ic"><Icon name="bell" size={18} /></span>
+        <div className="pf-list__body">
+          <div className="pf-list__t">Daily check-in reminder</div>
+          <div className="pf-list__d">{msg || label}</div>
+        </div>
+        {switchable && <Switch checked={state === 'on'} onChange={toggle} disabled={busy} />}
+      </div>
+      {state === 'on' && (
+        <div className="pf-list__row" onClick={sendTest} style={{ cursor: 'pointer' }}>
+          <span className="pf-list__ic"><Icon name="play" size={18} /></span>
+          <div className="pf-list__body"><div className="pf-list__t">Send a test notification</div></div>
+          <Icon name="chevronRight" size={18} className="pf-drill__chev" />
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ============================================================
    7 · You — profile
    ============================================================ */
@@ -807,7 +904,8 @@ function You({ profile, user, onLogout }) {
 
         <div className="pf-section-label rise" style={{ '--d': '.14s' }}>Settings</div>
         <div className="pf-list rise" style={{ '--d': '.16s' }}>
-          {[['bell', 'Notifications', 'Daily check-in 8:00'], ['sliders', 'Units & display', 'Metric'], ['shield', 'Privacy & data', 'On-device first']].map(([ic, t, d], i) => (
+          <NotificationToggle />
+          {[['sliders', 'Units & display', 'Metric'], ['shield', 'Privacy & data', 'On-device first']].map(([ic, t, d], i) => (
             <div className="pf-list__row" key={i}>
               <span className="pf-list__ic"><Icon name={ic} size={18} /></span>
               <div className="pf-list__body"><div className="pf-list__t">{t}</div><div className="pf-list__d">{d}</div></div>
@@ -924,6 +1022,9 @@ function App() {
     }
     setBooting(false);
   })(); }, []);
+
+  // register the service worker (push notifications)
+  useEffect(() => { if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {}); }, []);
 
   // reset scroll-to-top feel when switching tabs
   useEffect(() => { const el = document.querySelector('.pf-scroll'); if (el) el.scrollTop = 0; }, [tab, phase]);
