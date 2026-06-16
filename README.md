@@ -39,30 +39,59 @@ python3 -m http.server 4178
 
 Mobile-first: full-screen on a phone, shown inside a phone bezel on desktop.
 
-## Structure
+## Architecture
+
+Static frontend + serverless API on Vercel, backed by **Vercel Postgres**.
+Postgres is never exposed to the browser — the static app calls `/api/*` functions.
 
 ```
 pulseform-app/
 ├── index.html        # shell: loads DS tokens + React + the app
 ├── src/
-│   ├── app.jsx        # all screens, navigation, demo data model
+│   ├── app.jsx        # all screens, navigation, API client
 │   └── app.css        # screen-level layout (device frame, tab bar, screens)
 ├── ds/                # Pulseform Design System (tokens + component bundle)
-│   ├── styles.css     # @imports the token files
-│   ├── tokens/*.css   # colors, typography, spacing, effects, fonts
-│   └── _ds_bundle.js  # Button, Badge, ScoreRing, MetricCard, SignalBar, …
-└── assets/            # logos + photography
+├── assets/            # logos + photography
+├── api/               # Vercel serverless functions
+│   ├── auth/{signup,login,logout}.js
+│   ├── me.js          # current session + profile
+│   ├── profile.js     # GET / PUT onboarding data
+│   ├── checkins.js    # GET / POST daily readiness check-in
+│   └── migrate.js     # one-shot schema apply (token-guarded)
+├── lib/               # db pool, auth (jwt+bcrypt), http helpers, schema
+├── package.json       # function deps: pg, bcryptjs, jsonwebtoken
+└── vercel.json        # static + functions config
 ```
 
-It reuses the **actual** design-system primitives (`ScoreRing`, `MetricCard`,
-`SignalBar`, `Button`, `Badge`, `Avatar`, `Card`, `Input`, `Switch`) so colors,
-type and components match the handoff exactly. New app screens are composed on top.
+### Data model (Postgres)
+- **users** — email + bcrypt password hash
+- **profiles** — the onboarding data (name, body baselines, goal, injuries …)
+- **checkins** — one per user per day (sleep, soreness, pain → symptoms + run-ready)
+
+Auth is a signed JWT in an httpOnly cookie. The score metrics (cardio/biomech
+parameters) stay client-side demo data — they'd come from the sensor in production;
+the DB persists the account, profile and daily check-ins.
+
+## Deploy (Vercel)
+
+Required environment variables on the Vercel project:
+
+| Var | Purpose |
+|---|---|
+| `POSTGRES_URL` (or `DATABASE_URL`) | Postgres connection string — auto-set when you attach Vercel Postgres |
+| `SESSION_SECRET` | random string used to sign session cookies |
+| `MIGRATE_SECRET` | (optional) token to authorise `/api/migrate` |
+
+After the DB is attached and env vars are set, apply the schema once:
+
+```
+GET https://<deployment>/api/migrate?token=<MIGRATE_SECRET or SESSION_SECRET>
+```
 
 ## Notes / next steps
 
-- This is a **no-build prototype** (React + Babel from CDN, the same approach as the
-  design handoff deck) so it runs by just opening it. For production, port to Vite +
-  React and precompile (drop the in-browser Babel), and wire real sensor/data APIs in
-  place of the static demo model in `app.jsx`.
-- Data is illustrative but internally consistent — the check-in really does recompute
-  the RunReady score.
+- The **frontend** is still a no-build bundle (React + Babel from CDN). For
+  production, precompile the JSX (drop in-browser Babel) — the API layer is already
+  production-shaped.
+- Score metrics are illustrative; the **check-in really persists** and recomputes the
+  RunReady score per user per day.

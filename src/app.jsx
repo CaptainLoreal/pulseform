@@ -13,6 +13,34 @@ const { Button, Badge, Avatar, Card, Input, Switch, ScoreRing, MetricCard, Signa
 const cx = (...a) => a.filter(Boolean).join(' ');
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+/* ---- API client (talks to the Vercel serverless functions) ---- */
+async function api(path, opts = {}) {
+  try {
+    const res = await fetch('/api' + path, {
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* non-JSON (e.g. 404 page) */ }
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: 'Network error — could not reach the server.' } };
+  }
+}
+const DEFAULT_PROFILE = {
+  name: '', sex: 'Female', age: 31, height: 168, weight: 61, restHr: 52,
+  experience: 'Returning', weekly: 28, goal: 'return', injuries: ['Knee'], pain: 2,
+};
+const fromApiProfile = (p) => ({
+  name: p.name || '', sex: p.sex || 'Female', age: p.age ?? 31, height: p.height ?? 168,
+  weight: p.weight ?? 61, restHr: p.rest_hr ?? 52, experience: p.experience || 'Returning',
+  weekly: p.weekly ?? 28, goal: p.goal || 'return', injuries: p.injuries || [], pain: p.pain ?? 0,
+});
+const fromApiCheckin = (c) => ({
+  sleep: c.sleep, soreness: c.soreness, pain: c.pain, symptoms: c.symptoms, runReady: c.run_ready,
+});
+
 /* ---- icons (Lucide-style outline paths) -------------------- */
 const ICON = {
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
@@ -206,10 +234,19 @@ function Welcome({ onStart, onLogin }) {
 /* ============================================================
    2 · Login
    ============================================================ */
-function Login({ onAuthed, onBack }) {
-  const [email, setEmail] = useState('nathalie@runner.com');
-  const [pw, setPw] = useState('••••••••');
+function Login({ onLogin, onBack, onCreate }) {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    if (busy) return;
+    setErr(null); setBusy(true);
+    const r = await onLogin(email.trim(), pw);
+    setBusy(false);
+    if (!r.ok) setErr(r.error);
+  };
   return (
     <div className="pf-screen pf-screen--paper">
       <StatusBar />
@@ -225,25 +262,24 @@ function Login({ onAuthed, onBack }) {
 
         <div className="pf-auth__form">
           <Input label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)}
-            leadingIcon={<Icon name="mail" size={18} />} placeholder="you@runner.com" />
+            leadingIcon={<Icon name="mail" size={18} />} placeholder="you@runner.com" autoComplete="email" />
           <Input label="Password" type={show ? 'text' : 'password'} value={pw} onChange={e => setPw(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()} autoComplete="current-password" placeholder="Your password"
             leadingIcon={<Icon name="lock" size={18} />}
             trailingIcon={<span onClick={() => setShow(s => !s)} style={{ cursor: 'pointer' }}><Icon name="eye" size={18} /></span>} />
+          {err && <div className="pf-auth__err">{err}</div>}
           <div className="pf-auth__row">
             <Switch label="Stay signed in" defaultChecked />
             <button className="pf-auth__forgot">Forgot?</button>
           </div>
-          <Button size="lg" block onClick={onAuthed} trailingIcon={<Icon name="arrowRight" size={18} />}>Log in</Button>
+          <Button size="lg" block disabled={busy} onClick={submit}
+            trailingIcon={!busy && <Icon name="arrowRight" size={18} />}>
+            {busy ? 'Logging in…' : 'Log in'}
+          </Button>
         </div>
 
         <div className="pf-auth__spacer" />
-        <div className="pf-auth__divider">or continue with</div>
-        <div className="pf-auth__alt">
-          <Button variant="secondary" block leadingIcon={<Icon name="bluetooth" size={18} />} onClick={onAuthed}>
-            Pair my Pulseform sensor
-          </Button>
-        </div>
-        <div className="pf-auth__foot">New here? <button onClick={onBack}>Create account</button></div>
+        <div className="pf-auth__foot">New here? <button onClick={onCreate}>Create account</button></div>
       </div>
     </div>
   );
@@ -274,9 +310,11 @@ function Segmented({ options, value, set }) {
   );
 }
 
-function Onboarding({ onDone, profile, setProfile }) {
+function Onboarding({ profile, setProfile, authed, onFinish, onExit }) {
   const [step, setStep] = useState(0);
   const [building, setBuilding] = useState(false);
+  const [acct, setAcct] = useState({ email: '', password: '' });
+  const [err, setErr] = useState(null);
   const p = profile;
   const upd = (patch) => setProfile({ ...p, ...patch });
   const toggleInjury = (i) => {
@@ -285,7 +323,7 @@ function Onboarding({ onDone, profile, setProfile }) {
     upd({ injuries: next.includes(i) ? next.filter(x => x !== i) : [...next, i] });
   };
 
-  const steps = [
+  const baseSteps = [
     {
       eyebrow: 'About you', q: 'What should we call you?',
       hint: 'We personalise your plan and coaching around you.',
@@ -375,13 +413,46 @@ function Onboarding({ onDone, profile, setProfile }) {
     },
   ];
 
+  const accountStep = {
+    eyebrow: 'Your account', q: 'Save your progress.', account: true,
+    hint: 'Create an account so your baseline and daily check-ins sync across your devices.',
+    body: (
+      <div className="pf-fields">
+        <Field label="Email">
+          <div className="pf-input-wrap">
+            <span className="pf-input__adorn"><Icon name="mail" size={18} /></span>
+            <input className="pf-input" type="email" autoComplete="email" placeholder="you@runner.com"
+              value={acct.email} onChange={e => setAcct({ ...acct, email: e.target.value })} />
+          </div>
+        </Field>
+        <Field label="Password">
+          <div className="pf-input-wrap">
+            <span className="pf-input__adorn"><Icon name="lock" size={18} /></span>
+            <input className="pf-input" type="password" autoComplete="new-password" placeholder="At least 6 characters"
+              value={acct.password} onChange={e => setAcct({ ...acct, password: e.target.value })} />
+          </div>
+        </Field>
+        {err && <div className="pf-auth__err">{err}</div>}
+      </div>
+    ),
+  };
+  const steps = authed ? baseSteps : [...baseSteps, accountStep];
+
   const last = step === steps.length - 1;
   const s = steps[step];
-  const next = () => {
-    if (!last) return setStep(step + 1);
+  const finalize = async () => {
+    if (!authed) {
+      const e = acct.email.trim();
+      if (!/.+@.+\..+/.test(e)) return setErr('Enter a valid email address.');
+      if (acct.password.length < 6) return setErr('Password must be at least 6 characters.');
+    }
+    setErr(null);
     setBuilding(true);
-    setTimeout(onDone, 1500);
+    const r = await onFinish(authed ? null : { email: acct.email.trim(), password: acct.password });
+    if (!r || !r.ok) { setBuilding(false); setErr((r && r.error) || 'Something went wrong.'); setStep(steps.length - 1); }
+    // on success the parent switches phase and unmounts this screen
   };
+  const next = () => { if (last) return finalize(); setStep(step + 1); };
 
   if (building) {
     return (
@@ -405,8 +476,8 @@ function Onboarding({ onDone, profile, setProfile }) {
       <div className="pf-ob">
         <div className="pf-ob__top">
           {step > 0
-            ? <button className="pf-iconbtn" onClick={() => setStep(step - 1)} aria-label="Back"><Icon name="arrowLeft" size={20} /></button>
-            : <button className="pf-iconbtn" onClick={onDone} aria-label="Skip"><Icon name="x" size={20} /></button>}
+            ? <button className="pf-iconbtn" onClick={() => { setErr(null); setStep(step - 1); }} aria-label="Back"><Icon name="arrowLeft" size={20} /></button>
+            : <button className="pf-iconbtn" onClick={onExit} aria-label="Exit"><Icon name="x" size={20} /></button>}
           <div className="pf-ob__progress"><span style={{ width: `${((step + 1) / steps.length) * 100}%` }} /></div>
           <span className="pf-ob__step">{step + 1}/{steps.length}</span>
         </div>
@@ -420,7 +491,7 @@ function Onboarding({ onDone, profile, setProfile }) {
         </div>
         <div className="pf-ob__foot">
           <Button size="lg" block onClick={next} trailingIcon={!last && <Icon name="arrowRight" size={18} />}>
-            {last ? 'Build my baseline' : 'Continue'}
+            {last ? (authed ? 'Build my baseline' : 'Create account & build') : 'Continue'}
           </Button>
         </div>
       </div>
@@ -690,7 +761,7 @@ function Plan({ runReady, onStart }) {
 /* ============================================================
    7 · You — profile
    ============================================================ */
-function You({ profile, onLogout }) {
+function You({ profile, user, onLogout }) {
   const goal = GOALS.find(g => g.id === profile.goal);
   return (
     <div className="pf-screen">
@@ -701,8 +772,8 @@ function You({ profile, onLogout }) {
         <div className="pf-profile-head rise" style={{ '--d': '.04s' }}>
           <Avatar name={profile.name || 'Jordan Diaz'} size="lg" />
           <div className="pf-profile-head__meta">
-            <h2>{profile.name || 'Jordan Diaz'}</h2>
-            <p>{goal ? goal.name : 'Runner'} · {profile.experience}</p>
+            <h2>{profile.name || 'Runner'}</h2>
+            <p>{user?.email || (goal ? goal.name : 'Runner')}</p>
           </div>
         </div>
 
@@ -809,33 +880,118 @@ function computeSymptoms(c) {
   return clamp(Math.round(86 + (c.sleep - 4) * 4 - (c.soreness - 2) * 6 - painIdx * 16), 20, 99);
 }
 
+function Splash() {
+  return (
+    <div className="pf-screen pf-screen--dark">
+      <StatusBar dark />
+      <div className="pf-pair" style={{ margin: 'auto' }}>
+        <div className="pf-pair__ring">
+          <span className="pf-pair__pulse" /><span className="pf-pair__pulse" /><span className="pf-pair__pulse" />
+          <span className="pf-pair__core"><img src={ASSET('logo/pulseform-mark-white.png')} alt="Pulseform" /></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [booting, setBooting] = useState(true);
   const [phase, setPhase] = useState('welcome');       // welcome | login | onboarding | app
   const [tab, setTab] = useState('today');             // today | form | plan | you
   const [sheet, setSheet] = useState(false);
   const [checkin, setCheckin] = useState(null);
-  const [profile, setProfile] = useState({
-    name: 'Nathalie', sex: 'Female', age: 31, height: 168, weight: 61, restHr: 52,
-    experience: 'Returning', weekly: 28, goal: 'return', injuries: ['Knee'], pain: 2,
-  });
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
 
-  const symptoms = useMemo(() => computeSymptoms(checkin), [checkin]);
-  const runReady = useMemo(() => clamp(62 + Math.round((symptoms - 86) * 0.45), 0, 100), [symptoms]);
+  const symptoms = checkin ? checkin.symptoms : 86;
+  const runReady = checkin ? checkin.runReady : 62;
+
+  // Boot: identify the session and route accordingly.
+  useEffect(() => { (async () => {
+    const r = await api('/me');
+    if (r.ok && r.data.user) {
+      setUser(r.data.user);
+      const p = r.data.profile;
+      if (p) setProfile(fromApiProfile(p));
+      if (p && p.onboarded) {
+        setPhase('app');
+        const c = await api('/checkins');
+        if (c.ok && c.data.checkin) setCheckin(fromApiCheckin(c.data.checkin));
+      } else {
+        setPhase('onboarding');
+      }
+    } else {
+      setPhase('welcome');
+    }
+    setBooting(false);
+  })(); }, []);
 
   // reset scroll-to-top feel when switching tabs
   useEffect(() => { const el = document.querySelector('.pf-scroll'); if (el) el.scrollTop = 0; }, [tab, phase]);
 
+  const enterApp = async () => {
+    setTab('today'); setPhase('app');
+    const c = await api('/checkins');
+    if (c.ok && c.data.checkin) setCheckin(fromApiCheckin(c.data.checkin));
+  };
+
+  const doLogin = async (email, password) => {
+    const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    if (!r.ok) return { ok: false, error: r.data.error || 'Could not log in.' };
+    const me = await api('/me');
+    if (me.ok && me.data.user) {
+      setUser(me.data.user);
+      const p = me.data.profile;
+      if (p) setProfile(fromApiProfile(p));
+      if (p && p.onboarded) await enterApp();
+      else setPhase('onboarding');
+    }
+    return { ok: true };
+  };
+
+  const finishOnboarding = async (account) => {
+    if (account) {
+      const s = await api('/auth/signup', { method: 'POST', body: JSON.stringify(account) });
+      if (!s.ok) return { ok: false, error: s.data.error || 'Could not create account.' };
+      setUser(s.data.user);
+    }
+    const body = {
+      name: profile.name, sex: profile.sex, age: profile.age, height: profile.height,
+      weight: profile.weight, restHr: profile.restHr, experience: profile.experience,
+      weekly: profile.weekly, goal: profile.goal, injuries: profile.injuries, pain: profile.pain,
+    };
+    const pr = await api('/profile', { method: 'PUT', body: JSON.stringify(body) });
+    if (!pr.ok) return { ok: false, error: pr.data.error || 'Could not save your profile.' };
+    await enterApp();
+    return { ok: true };
+  };
+
+  const saveCheckin = async (c) => {
+    const sym = computeSymptoms(c);
+    const rr = clamp(62 + Math.round((sym - 86) * 0.45), 0, 100);
+    const full = { ...c, symptoms: sym, runReady: rr };
+    setCheckin(full); setSheet(false);
+    api('/checkins', { method: 'POST', body: JSON.stringify(full) }); // persist optimistically
+  };
+
+  const logout = async () => {
+    await api('/auth/logout', { method: 'POST' });
+    setUser(null); setProfile(DEFAULT_PROFILE); setCheckin(null);
+    setTab('today'); setPhase('welcome');
+  };
+
   let screen;
-  if (phase === 'welcome') screen = <Welcome onStart={() => setPhase('onboarding')} onLogin={() => setPhase('login')} />;
-  else if (phase === 'login') screen = <Login onAuthed={() => setPhase('app')} onBack={() => setPhase('welcome')} />;
-  else if (phase === 'onboarding') screen = <Onboarding profile={profile} setProfile={setProfile} onDone={() => setPhase('app')} />;
+  if (booting) screen = <Splash />;
+  else if (phase === 'welcome') screen = <Welcome onStart={() => setPhase('onboarding')} onLogin={() => setPhase('login')} />;
+  else if (phase === 'login') screen = <Login onLogin={doLogin} onBack={() => setPhase('welcome')} onCreate={() => setPhase('onboarding')} />;
+  else if (phase === 'onboarding') screen = <Onboarding profile={profile} setProfile={setProfile} authed={!!user} onFinish={finishOnboarding} onExit={() => (user ? logout() : setPhase('welcome'))} />;
   else {
     const tabs = {
       today: <Today profile={profile} checkin={checkin} runReady={runReady} symptoms={symptoms}
         goForm={() => setTab('form')} goCardio={() => setTab('today')} openCheckin={() => setSheet(true)} />,
       form: <Form goPlan={() => setTab('plan')} />,
       plan: <Plan runReady={runReady} onStart={() => setSheet('started')} />,
-      you: <You profile={profile} onLogout={() => { setPhase('welcome'); setTab('today'); setCheckin(null); }} />,
+      you: <You profile={profile} user={user} onLogout={logout} />,
     };
     screen = (
       <>
@@ -845,16 +1001,13 @@ function App() {
     );
   }
 
-  const showStatusDark = phase === 'welcome';
-
   return (
     <div className="device">
       <div className="device__island" />
       <div className="device__screen">
         {screen}
         {sheet === true && (
-          <CheckInSheet initial={checkin} onClose={() => setSheet(false)}
-            onSave={(c) => { setCheckin(c); setSheet(false); }} />
+          <CheckInSheet initial={checkin} onClose={() => setSheet(false)} onSave={saveCheckin} />
         )}
         {sheet === 'started' && (
           <>
