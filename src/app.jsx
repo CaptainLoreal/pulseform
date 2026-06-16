@@ -89,6 +89,24 @@ async function disablePush() {
   return { ok: true };
 }
 
+/* ---- run formatting ---- */
+const fmtDur = (s) => {
+  s = Math.round(+s || 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`;
+};
+const fmtPace = (distM, durS) => {
+  distM = +distM; durS = +durS;
+  if (!distM || !durS) return '—';
+  const p = (durS / 60) / (distM / 1000);
+  const m = Math.floor(p), s = Math.round((p - m) * 60);
+  return `${m}:${String(s).padStart(2, '0')}/km`;
+};
+const fmtDate = (iso) => {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (e) { return ''; }
+};
+
 /* ---- icons (Lucide-style outline paths) -------------------- */
 const ICON = {
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
@@ -855,6 +873,59 @@ function NotificationToggle() {
   );
 }
 
+/* ---- Garmin / device run import (used on the You screen) ---- */
+function ImportRuns() {
+  const [runs, setRuns] = useState([]);
+  const [status, setStatus] = useState(null);
+  const inputRef = React.useRef(null);
+  const load = async () => { const r = await api('/runs'); if (r.ok) setRuns(r.data.runs || []); };
+  useEffect(() => { load(); }, []);
+  const onFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setStatus(`Importing ${file.name}…`);
+    try {
+      const buf = await file.arrayBuffer();
+      const res = await fetch(`/api/import?name=${encodeURIComponent(file.name)}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/octet-stream' }, body: buf,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.run) { setStatus(`Imported ${(+data.run.distance_m / 1000).toFixed(1)} km`); load(); }
+      else setStatus(data.error || 'Could not import that file.');
+    } catch (err) { setStatus('Could not read that file.'); }
+  };
+  return (
+    <>
+      <div className="pf-section-label rise" style={{ '--d': '.18s' }}>Devices &amp; data</div>
+      <div className="pf-list rise" style={{ '--d': '.2s' }}>
+        <div className="pf-list__row" onClick={() => inputRef.current && inputRef.current.click()} style={{ cursor: 'pointer' }}>
+          <span className="pf-list__ic"><Icon name="activity" size={18} /></span>
+          <div className="pf-list__body">
+            <div className="pf-list__t">Import a run</div>
+            <div className="pf-list__d">{status || 'Garmin export · .fit / .tcx / .gpx'}</div>
+          </div>
+          <Icon name="plus" size={18} className="pf-drill__chev" />
+          <input ref={inputRef} type="file" accept=".fit,.tcx,.gpx" style={{ display: 'none' }} onChange={onFile} />
+        </div>
+        {runs.map((r) => (
+          <div className="pf-list__row" key={r.id}>
+            <span className="pf-list__ic" style={{ background: 'var(--accent-soft)', color: 'var(--text-accent)' }}><Icon name="activity" size={18} /></span>
+            <div className="pf-list__body">
+              <div className="pf-list__t">{(+r.distance_m / 1000).toFixed(1)} km · {fmtDur(r.duration_s)}</div>
+              <div className="pf-list__d">
+                {fmtDate(r.started_at)} · {String(r.source).toUpperCase()} · {fmtPace(r.distance_m, r.duration_s)}
+                {r.avg_hr ? ` · ${r.avg_hr} bpm` : ''}{r.avg_cadence ? ` · ${r.avg_cadence} spm` : ''}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /* ============================================================
    7 · You — profile
    ============================================================ */
@@ -913,6 +984,8 @@ function You({ profile, user, onLogout }) {
             </div>
           ))}
         </div>
+
+        <ImportRuns />
 
         <div style={{ marginTop: 20 }} className="rise">
           <Button variant="secondary" block leadingIcon={<Icon name="logout" size={18} />} onClick={onLogout}>Log out</Button>
