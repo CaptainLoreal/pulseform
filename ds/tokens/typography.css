@@ -1,0 +1,49 @@
+/* ============================================================
+   Pulseform — Typography tokens
+   ============================================================ */
+
+:root {
+  /* families */
+  --font-display: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
+  --font-sans:    'Hanken Grotesk', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Space Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* weights */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-black:    800;
+
+  /* type scale (16px base) */
+  --text-2xs: 0.6875rem;  /* 11 */
+  --text-xs:  0.75rem;    /* 12 */
+  --text-sm:  0.875rem;   /* 14 */
+  --text-base:1rem;       /* 16 */
+  --text-md:  1.125rem;   /* 18 */
+  --text-lg:  1.25rem;    /* 20 */
+  --text-xl:  1.5rem;     /* 24 */
+  --text-2xl: 1.875rem;   /* 30 */
+  --text-3xl: 2.375rem;   /* 38 */
+  --text-4xl: 3rem;       /* 48 */
+  --text-5xl: 3.875rem;   /* 62 */
+  --text-6xl: 5rem;       /* 80 */
+
+  /* line heights */
+  --leading-none:    1;
+  --leading-tight:   1.08;
+  --leading-snug:    1.22;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.62;
+
+  /* letter spacing */
+  --tracking-tighter: -0.03em;
+  --tracking-tight:   -0.018em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.04em;
+  --tracking-eyebrow: 0.16em;  /* uppercase mono labels */
+
+  /* numerals — use for scores, metrics, readouts */
+  --numeric: var(--font-display);
+  --font-feature-numeric: "tnum" 1, "lnum" 1;
+}

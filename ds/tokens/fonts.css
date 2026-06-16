@@ -1,0 +1,12 @@
+/* ============================================================
+   Pulseform — Webfonts
+   ------------------------------------------------------------
+   Display + body : Hanken Grotesk  (warm geometric grotesque)
+   Technical/data : Space Mono      (sensor-readout voice)
+
+   NOTE: loaded from Google Fonts. See readme.md → "Font
+   substitution" — swap these @import lines for self-hosted
+   @font-face rules if you need fully offline/owned binaries.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&family=Space+Mono:wght@400;700&display=swap');

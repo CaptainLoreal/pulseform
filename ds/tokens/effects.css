@@ -1,0 +1,42 @@
+/* ============================================================
+   Pulseform — Radii, shadows, motion, blur
+   Cards: soft, generous radius, low-spread ambient shadow,
+   hairline border. No hard drop shadows.
+   ============================================================ */
+
+:root {
+  /* radii */
+  --radius-xs:   6px;
+  --radius-sm:   10px;
+  --radius-md:   14px;
+  --radius-lg:   20px;
+  --radius-xl:   28px;
+  --radius-2xl:  36px;
+  --radius-pill: 999px;
+  --radius-card: 20px;
+  --radius-control: 12px;
+
+  /* shadows — soft, warm-neutral ambient */
+  --shadow-xs: 0 1px 2px rgba(14,18,17,0.05);
+  --shadow-sm: 0 2px 6px rgba(14,18,17,0.06);
+  --shadow-md: 0 6px 18px rgba(14,18,17,0.08);
+  --shadow-lg: 0 16px 40px rgba(14,18,17,0.10);
+  --shadow-xl: 0 28px 64px rgba(14,18,17,0.14);
+  /* teal cast under primary controls */
+  --shadow-accent: 0 10px 26px rgba(0,147,133,0.28);
+  /* inset hairline for sunken/track elements */
+  --shadow-inset: inset 0 0 0 1px rgba(14,18,17,0.04);
+
+  /* motion */
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);   /* @kind other */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);    /* @kind other */
+  --ease-in-out:   cubic-bezier(0.65, 0, 0.35, 1);   /* @kind other */
+  --duration-fast: 120ms;   /* @kind other */
+  --duration-base: 200ms;   /* @kind other */
+  --duration-slow: 320ms;   /* @kind other */
+
+  /* blur (frosted overlays on photography) */
+  --blur-sm: 8px;
+  --blur-md: 16px;
+  --blur-lg: 28px;
+}
