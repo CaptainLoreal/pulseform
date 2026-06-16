@@ -473,9 +473,11 @@ input[type=range].pf-range::-webkit-slider-thumb {
 }
 .pf-plan-hero__cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.7); }
 .pf-plan-hero__title { font-family: var(--font-display); font-weight: 800; font-size: 25px; letter-spacing: -0.03em; margin: 8px 0 4px; }
-.pf-plan-hero__row { display: flex; gap: 18px; margin-top: 16px; }
-.pf-plan-hero__stat small { display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.65); margin-bottom: 2px; }
-.pf-plan-hero__stat b { font-family: var(--font-display); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
+.pf-plan-hero__row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+.pf-plan-hero__stat small { display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.6); margin-bottom: 4px; }
+.pf-plan-hero__stat b { display: block; font-family: var(--font-display); font-weight: 800; font-size: 22px; letter-spacing: -0.02em; line-height: 1.05; white-space: nowrap; }
+.pf-plan-hero__stat i { display: block; font-style: normal; font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 3px; white-space: nowrap; }
+.pf-plan-hero__stat .pf-strike { text-decoration: line-through; opacity: 0.55; }
 
 .pf-drills { display: flex; flex-direction: column; gap: 10px; }
 .pf-drill {
@@ -487,7 +489,7 @@ input[type=range].pf-range::-webkit-slider-thumb {
 }
 .pf-drill:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .pf-drill__dot { width: 10px; height: 10px; border-radius: 999px; background: var(--accent); flex: none; }
-.pf-drill__body { flex: 1; min-width: 0; }
+.pf-drill__body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pf-drill__name { font-weight: 700; font-size: 15px; color: var(--text-strong); }
 .pf-drill__dose { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .pf-drill__chev { color: var(--text-faint); flex: none; }

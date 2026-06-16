@@ -628,7 +628,7 @@ function Form({ goPlan }) {
       <div className="pf-scroll">
         <header className="pf-apphead rise">
           <div>
-            <span className="pf-eyebrow">Biomechanics · weekly read</span>
+            <span className="pf-eyebrow">Biomechanics</span>
             <h2 className="pf-apphead__title">How you move</h2>
           </div>
           <Badge tone="neutral" mono>Updated {BIOMECH.updated}</Badge>
@@ -712,9 +712,9 @@ function Plan({ runReady, onStart }) {
             We swapped tomorrow’s tempo block for Zone 2 plus a knee-stability circuit.
           </div>
           <div className="pf-plan-hero__row">
-            <div className="pf-plan-hero__stat"><small>Was</small><b style={{ textDecoration: 'line-through', opacity: .6 }}>Tempo 8 km</b></div>
-            <div className="pf-plan-hero__stat"><small>Now</small><b>Easy 6 km</b></div>
-            <div className="pf-plan-hero__stat"><small>RunReady</small><b>{runReady}/100</b></div>
+            <div className="pf-plan-hero__stat"><small>Was</small><b className="pf-strike">8 km</b><i>tempo</i></div>
+            <div className="pf-plan-hero__stat"><small>Now</small><b>6 km</b><i>easy · Z2</i></div>
+            <div className="pf-plan-hero__stat"><small>RunReady</small><b>{runReady}</b><i>/ 100</i></div>
           </div>
         </div>
 
@@ -782,7 +782,7 @@ function You({ profile, user, onLogout }) {
             <span className="pf-sensor-card__ic"><Icon name="bluetooth" size={22} /></span>
             <div style={{ flex: 1 }}>
               <div className="pf-sessrow__t">Pulseform sensor</div>
-              <div className="pf-sessrow__d"><span className="pf-livedot" style={{ marginRight: 6 }} />Connected · 100% battery</div>
+              <div className="pf-sessrow__d"><span className="pf-livedot" style={{ marginRight: 6 }} />Connected · 100%</div>
             </div>
             <Badge tone="ready" dot>Live</Badge>
           </div>
@@ -799,8 +799,7 @@ function You({ profile, user, onLogout }) {
           ].map(([ic, t, val], i) => (
             <div className="pf-list__row" key={i}>
               <span className="pf-list__ic"><Icon name={ic} size={18} /></span>
-              <div className="pf-list__body"><div className="pf-list__t">{t}</div></div>
-              <span className="pf-list__val">{val}</span>
+              <div className="pf-list__body"><div className="pf-list__t">{t}</div><div className="pf-list__d">{val}</div></div>
               <Icon name="chevronRight" size={18} className="pf-drill__chev" />
             </div>
           ))}
