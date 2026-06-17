@@ -65,19 +65,33 @@ async function getPushState() {
   } catch (e) { return 'off'; }
 }
 async function enablePush() {
-  if (!pushSupported()) return { ok: false, error: 'Not supported on this browser.' };
-  const perm = await Notification.requestPermission();
-  if (perm !== 'granted') return { ok: false, error: 'Notifications were blocked.' };
-  const reg = await navigator.serviceWorker.register('/sw.js');
-  await navigator.serviceWorker.ready;
-  const v = await api('/push?action=vapid');
-  if (!v.ok || !v.data.publicKey) return { ok: false, error: 'Server push isn’t configured yet.' };
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlB64ToUint8Array(v.data.publicKey),
-  });
-  const r = await api('/push?action=subscribe', { method: 'POST', body: JSON.stringify(sub) });
-  return r.ok ? { ok: true } : { ok: false, error: r.data.error || 'Could not subscribe.' };
+  try {
+    if (!pushSupported()) {
+      return { ok: false, error: isIOS() && !isStandalone()
+        ? 'On iPhone, Add to Home Screen first, then open Pulseform from the home screen.'
+        : 'Notifications aren’t supported on this browser.' };
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return { ok: false, error: 'You blocked notifications. Enable them in your browser settings.' };
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const v = await api('/push?action=vapid');
+    if (!v.ok || !v.data.publicKey) return { ok: false, error: 'Server push isn’t configured yet.' };
+    let sub;
+    try {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(v.data.publicKey),
+      });
+    } catch (e) {
+      const why = e && (e.name || e.message) || 'unknown';
+      return { ok: false, error: `Browser couldn’t subscribe (${why}).` };
+    }
+    const r = await api('/push?action=subscribe', { method: 'POST', body: JSON.stringify(sub) });
+    return r.ok ? { ok: true } : { ok: false, error: r.data.error || 'Could not save your subscription.' };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || 'Push setup failed.' };
+  }
 }
 async function disablePush() {
   const reg = await navigator.serviceWorker.getRegistration();
@@ -337,7 +351,6 @@ function Welcome({ onStart, onLogin }) {
     <div className="pf-hero">
       <div className="pf-hero__bleed"><img src={ASSET('photos/runner-woman-strap.jpg')} alt="" /></div>
       <div className="pf-hero__scrim" />
-      <StatusBar dark over />
       <div className="pf-hero__layer">
         <div className="pf-lockup rise" style={{ '--d': '0s' }}>
           <img src={ASSET('logo/pulseform-mark-white.png')} alt="" />
@@ -381,7 +394,6 @@ function Login({ onLogin, onBack, onCreate }) {
   };
   return (
     <div className="pf-screen pf-screen--paper">
-      <StatusBar />
       <div className="pf-auth">
         <div className="pf-auth__head">
           <button className="pf-iconbtn" onClick={onBack} aria-label="Back"><Icon name="arrowLeft" size={20} /></button>
@@ -589,7 +601,6 @@ function Onboarding({ profile, setProfile, authed, onFinish, onExit }) {
   if (building) {
     return (
       <div className="pf-screen pf-screen--paper">
-        <StatusBar />
         <div className="pf-pair" style={{ margin: 'auto' }}>
           <div className="pf-pair__ring">
             <span className="pf-pair__pulse" /><span className="pf-pair__pulse" /><span className="pf-pair__pulse" />
@@ -604,7 +615,6 @@ function Onboarding({ profile, setProfile, authed, onFinish, onExit }) {
 
   return (
     <div className="pf-screen pf-screen--paper">
-      <StatusBar />
       <div className="pf-ob">
         <div className="pf-ob__top">
           {step > 0
@@ -660,7 +670,6 @@ function Today({ profile, checkin, runReady, symptoms, goForm, goCardio, openChe
   const badgeText = runReady >= 67 ? 'Good to push today' : runReady >= 40 ? 'Train, but adapt intensity' : 'Hold back — recover';
   return (
     <div className="pf-screen">
-      <StatusBar />
       <div className="pf-scroll">
         <header className="pf-apphead rise">
           <div>
@@ -756,7 +765,6 @@ function Form({ goPlan }) {
   const limiters = BIOMECH.params.filter(p => p.flag);
   return (
     <div className="pf-screen">
-      <StatusBar />
       <div className="pf-scroll">
         <header className="pf-apphead rise">
           <div>
@@ -821,7 +829,6 @@ function Form({ goPlan }) {
 function Plan({ runReady, onStart }) {
   return (
     <div className="pf-screen">
-      <StatusBar />
       <div className="pf-scroll">
         <header className="pf-apphead rise">
           <div>
@@ -1132,7 +1139,6 @@ function You({ profile, user, onLogout }) {
   const goal = GOALS.find(g => g.id === profile.goal);
   return (
     <div className="pf-screen">
-      <StatusBar />
       <div className="pf-scroll">
         <header className="pf-apphead rise"><h2 className="pf-apphead__title">You</h2><Icon name="sliders" size={22} /></header>
 
@@ -1252,7 +1258,6 @@ function computeSymptoms(c) {
 function Splash() {
   return (
     <div className="pf-screen pf-screen--dark">
-      <StatusBar dark />
       <div className="pf-pair" style={{ margin: 'auto' }}>
         <div className="pf-pair__ring">
           <span className="pf-pair__pulse" /><span className="pf-pair__pulse" /><span className="pf-pair__pulse" />

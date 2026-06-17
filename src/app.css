@@ -82,7 +82,12 @@ body {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
   background: var(--surface-page);
+  /* respect the iOS status bar in standalone PWA; fall back to a small
+     top inset in the desktop bezel mockup */
+  padding-top: max(env(safe-area-inset-top, 0px), 16px);
 }
+.pf-hero { padding-top: max(env(safe-area-inset-top, 0px), 28px); }
+.pf-hero__layer { padding-top: 14px; }
 .pf-screen--dark {
   background: radial-gradient(120% 90% at 50% 0%, #15302b 0%, #0e1211 58%);
   color: #fff;
@@ -391,8 +396,8 @@ input[type=range].pf-range::-webkit-slider-thumb {
 .pf-bd__top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .pf-bd__ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; }
 .pf-bd__cad { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
-.pf-bd__val { font-family: var(--font-display); font-weight: 800; font-size: 38px; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
-.pf-bd__val small { font-family: var(--font-mono); font-size: 13px; font-weight: 400; color: var(--text-faint); }
+.pf-bd__val { font-family: var(--font-display); font-weight: 800; font-size: 38px; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; display: inline-flex; align-items: baseline; }
+.pf-bd__val small { font-family: var(--font-mono); font-size: 13px; font-weight: 400; color: var(--text-faint); letter-spacing: 0; margin-left: 5px; }
 .pf-bd__name { font-size: 13px; font-weight: 600; color: var(--text-body); margin-top: 6px; }
 .pf-bd__trend { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 11px; font-weight: 700; margin-top: 8px; }
 .pf-bd--ready  .pf-bd__ic { background: var(--ready-50);  color: var(--teal-700); }
@@ -434,8 +439,8 @@ input[type=range].pf-range::-webkit-slider-thumb {
 .pf-bio-hero__fig { flex: none; }
 .pf-bio-hero__meta { flex: 1; }
 .pf-bio-hero__cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--teal-300); }
-.pf-bio-hero__val { font-family: var(--font-display); font-weight: 800; font-size: 52px; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; margin: 6px 0; }
-.pf-bio-hero__val small { font-family: var(--font-mono); font-size: 15px; font-weight: 400; color: rgba(255,255,255,0.5); }
+.pf-bio-hero__val { font-family: var(--font-display); font-weight: 800; font-size: 52px; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; margin: 6px 0; display: inline-flex; align-items: baseline; }
+.pf-bio-hero__val small { font-family: var(--font-mono); font-size: 15px; font-weight: 400; color: rgba(255,255,255,0.5); letter-spacing: 0; margin-left: 8px; }
 .pf-bio-hero__note { font-size: 13px; color: rgba(255,255,255,0.72); line-height: 1.45; }
 
 /* gait param list */
@@ -618,7 +623,6 @@ input[type=range].pf-range::-webkit-slider-thumb {
 .pf-scorecard, .pf-bio-hero, .pf-plan-hero { box-shadow: var(--shadow-md); }
 
 /* Biomech hero numerals: keep the unit clear of the figure */
-.pf-bio-hero__val small { margin-left: 4px; }
 
 /* ---------------------------------------------------------------
    Video analysis — capture, gallery, player
