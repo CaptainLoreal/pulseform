@@ -664,17 +664,27 @@ function BreakdownCard({ tone, cap, value, name, trend, trendUp, onClick }) {
 /* ============================================================
    4 · Today — Run-Readiness + Cardiovascular (Fitness Scores)
    ============================================================ */
+function greetingFor(hour) {
+  if (hour < 5)  return 'Still up';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 22) return 'Good evening';
+  return 'Good night';
+}
 function Today({ profile, checkin, runReady, symptoms, goForm, goCardio, openCheckin }) {
   const first = (profile.name || 'Jordan').split(' ')[0];
   const readyTone = runReady >= 67 ? 'ready' : runReady >= 40 ? 'caution' : 'strain';
   const badgeText = runReady >= 67 ? 'Good to push today' : runReady >= 40 ? 'Train, but adapt intensity' : 'Hold back — recover';
+  const now = new Date();
+  const greeting = greetingFor(now.getHours());
+  const dayName = now.toLocaleDateString(undefined, { weekday: 'long' });
   return (
     <div className="pf-screen">
       <div className="pf-scroll">
         <header className="pf-apphead rise">
           <div>
-            <span className="pf-eyebrow">Tuesday · Easy week</span>
-            <h2 className="pf-apphead__title">Good morning, {first}</h2>
+            <span className="pf-eyebrow">{dayName} · Easy week</span>
+            <h2 className="pf-apphead__title">{greeting}, {first}</h2>
           </div>
           <Avatar name={profile.name || 'Jordan Diaz'} />
         </header>
