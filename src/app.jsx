@@ -107,6 +107,72 @@ const fmtDate = (iso) => {
   try { return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (e) { return ''; }
 };
 
+/* ---- IndexedDB (videos live on the device; metadata + thumb go to Postgres) ---- */
+const IDB_NAME = 'pulseform';
+const IDB_STORE = 'videos';
+function idb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbPut(key, blob) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(blob, key);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const r = tx.objectStore(IDB_STORE).get(key);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function idbDel(key) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+const newLocalId = () =>
+  'v_' + (window.crypto && crypto.randomUUID ? crypto.randomUUID() :
+          Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+
+/* Extract a thumbnail + duration/dimensions from a video file. */
+function extractVideoMeta(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata'; v.muted = true; v.playsInline = true; v.src = url;
+    const cleanup = () => URL.revokeObjectURL(url);
+    let seeked = false;
+    v.onloadeddata = () => { try { v.currentTime = Math.min(0.6, (v.duration || 1) * 0.1); } catch (e) {} };
+    v.onseeked = () => {
+      if (seeked) return; seeked = true;
+      try {
+        const cv = document.createElement('canvas');
+        const W = 320, ratio = (v.videoWidth || 4) / (v.videoHeight || 3);
+        cv.width = W; cv.height = Math.round(W / ratio);
+        cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+        resolve({ thumb: cv.toDataURL('image/jpeg', 0.72),
+          width: v.videoWidth, height: v.videoHeight, duration: v.duration });
+      } catch (e) { reject(e); } finally { cleanup(); }
+    };
+    v.onerror = () => { cleanup(); reject(new Error('Could not read that video.')); };
+  });
+}
+
 /* ---- icons (Lucide-style outline paths) -------------------- */
 const ICON = {
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
@@ -736,13 +802,7 @@ function Form({ goPlan }) {
           ))}
         </Card>
 
-        <Card className="rise pf-mt-card" style={{ '--d': '.16s', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span className="pf-sessrow__ic"><Icon name="ruler" size={20} /></span>
-          <div className="pf-sessrow__body">
-            <div className="pf-sessrow__t">Next video analysis</div>
-            <div className="pf-sessrow__d">In 3 days · sharpens the weekly read</div>
-          </div>
-        </Card>
+        <VideoAnalysis />
 
         <div style={{ marginTop: 18 }} className="rise">
           <Button size="lg" block onClick={goPlan} trailingIcon={<Icon name="arrowRight" size={18} />}>
@@ -869,6 +929,145 @@ function NotificationToggle() {
           <Icon name="chevronRight" size={18} className="pf-drill__chev" />
         </div>
       )}
+    </>
+  );
+}
+
+/* ---- Video analysis (used on the Form screen) ----
+   Capture: native camera via <input capture="environment">, or file picker.
+   Storage: video blob → IndexedDB on this device; thumb + metadata → Postgres.
+*/
+const VIDEO_KINDS = [
+  { id: 'side', name: 'Side-on', hint: 'Best for cadence, knee tracking' },
+  { id: 'front', name: 'Front-on', hint: 'Best for valgus & pelvic drop' },
+  { id: 'rear',  name: 'Rear-on', hint: 'Best for foot strike & pronation' },
+];
+
+function VideoCapture({ onSaved }) {
+  const cameraRef = React.useRef(null);
+  const fileRef = React.useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const handle = async (file) => {
+    if (!file) return;
+    setErr(null); setBusy(true);
+    try {
+      const meta = await extractVideoMeta(file);
+      const localId = newLocalId();
+      await idbPut(localId, file);
+      const body = {
+        local_id: localId, kind: 'side',
+        duration_s: Math.round((meta.duration || 0) * 10) / 10,
+        width: meta.width, height: meta.height, thumb: meta.thumb,
+      };
+      const r = await api('/videos', { method: 'POST', body: JSON.stringify(body) });
+      if (!r.ok) { await idbDel(localId); throw new Error(r.data.error || 'Could not save.'); }
+      onSaved && onSaved(r.data.video);
+    } catch (e) { setErr(e.message || 'Could not import that video.'); }
+    finally { setBusy(false); }
+  };
+  const onCamera = (e) => { handle(e.target.files && e.target.files[0]); e.target.value = ''; };
+  const onUpload = (e) => { handle(e.target.files && e.target.files[0]); e.target.value = ''; };
+
+  return (
+    <div className="pf-vid-cta">
+      <button className="pf-vid-cta__btn pf-vid-cta__btn--primary"
+        onClick={() => cameraRef.current && cameraRef.current.click()} disabled={busy}>
+        <span className="pf-vid-cta__ic"><Icon name="play" size={22} /></span>
+        <span className="pf-vid-cta__body">
+          <span className="pf-vid-cta__t">{busy ? 'Processing…' : 'Record analysis video'}</span>
+          <span className="pf-vid-cta__d">8–10 sec at steady pace</span>
+        </span>
+      </button>
+      <button className="pf-vid-cta__btn"
+        onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>
+        <span className="pf-vid-cta__ic"><Icon name="plus" size={20} /></span>
+        <span className="pf-vid-cta__body">
+          <span className="pf-vid-cta__t">Upload from library</span>
+          <span className="pf-vid-cta__d">Pick an existing clip</span>
+        </span>
+      </button>
+      {err && <div className="pf-auth__err">{err}</div>}
+      <input ref={cameraRef} type="file" accept="video/*" capture="environment" style={{ display: 'none' }} onChange={onCamera} />
+      <input ref={fileRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={onUpload} />
+    </div>
+  );
+}
+
+function VideoPlayer({ video, onClose, onDelete }) {
+  const [url, setUrl] = useState(null);
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    let active = true, objectUrl = null;
+    (async () => {
+      const blob = await idbGet(video.local_id).catch(() => null);
+      if (!active) return;
+      if (!blob) return setMissing(true);
+      objectUrl = URL.createObjectURL(blob);
+      setUrl(objectUrl);
+    })();
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [video.local_id]);
+  return (
+    <>
+      <div className="pf-sheet-scrim" onClick={onClose} />
+      <div className="pf-sheet pf-sheet--video">
+        <div className="pf-sheet__grab" />
+        <h3 className="pf-sheet__title">{VIDEO_KINDS.find(k => k.id === video.kind)?.name || 'Analysis video'}</h3>
+        <p className="pf-sheet__sub">{fmtDate(video.recorded_at)} · {fmtDur(video.duration_s)}</p>
+        {missing ? (
+          <div className="pf-vid-missing">
+            <Icon name="info" size={20} />
+            <span>This video was recorded on another device — it isn’t stored here.</span>
+          </div>
+        ) : url ? (
+          <video src={url} className="pf-vid-player" controls autoPlay playsInline muted />
+        ) : (
+          <div className="pf-vid-player pf-vid-player--loading" />
+        )}
+        <div className="pf-adapt-actions" style={{ marginTop: 14 }}>
+          <Button block onClick={onClose}>Done</Button>
+          <Button variant="ghost" block onClick={() => onDelete(video)}>Delete video</Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function VideoAnalysis() {
+  const [videos, setVideos] = useState([]);
+  const [playing, setPlaying] = useState(null);
+  const load = async () => { const r = await api('/videos'); if (r.ok) setVideos(r.data.videos || []); };
+  useEffect(() => { load(); }, []);
+  const onDelete = async (v) => {
+    await api('/videos?id=' + v.id, { method: 'DELETE' });
+    await idbDel(v.local_id).catch(() => {});
+    setPlaying(null); load();
+  };
+  return (
+    <>
+      <div className="pf-section-label rise" style={{ '--d': '.24s' }}>Video analysis</div>
+      <Card className="rise" style={{ '--d': '.26s' }}>
+        <VideoCapture onSaved={() => load()} />
+        {videos.length > 0 && (
+          <div className="pf-vidgrid">
+            {videos.map(v => (
+              <button key={v.id} className="pf-vid" onClick={() => setPlaying(v)}>
+                {v.thumb
+                  ? <img src={v.thumb} alt="" />
+                  : <div className="pf-vid__placeholder"><Icon name="activity" size={28} /></div>}
+                <span className="pf-vid__play"><Icon name="play" size={18} /></span>
+                <div className="pf-vid__meta">
+                  <span>{fmtDate(v.recorded_at)}</span>
+                  <span>{fmtDur(v.duration_s)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </Card>
+      {playing && <VideoPlayer video={playing} onClose={() => setPlaying(null)} onDelete={onDelete} />}
     </>
   );
 }
