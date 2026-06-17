@@ -70,20 +70,20 @@ async function enablePush() {
   if (perm !== 'granted') return { ok: false, error: 'Notifications were blocked.' };
   const reg = await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
-  const v = await api('/push/vapid');
+  const v = await api('/push?action=vapid');
   if (!v.ok || !v.data.publicKey) return { ok: false, error: 'Server push isn’t configured yet.' };
   const sub = await reg.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: urlB64ToUint8Array(v.data.publicKey),
   });
-  const r = await api('/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+  const r = await api('/push?action=subscribe', { method: 'POST', body: JSON.stringify(sub) });
   return r.ok ? { ok: true } : { ok: false, error: r.data.error || 'Could not subscribe.' };
 }
 async function disablePush() {
   const reg = await navigator.serviceWorker.getRegistration();
   const sub = reg && (await reg.pushManager.getSubscription());
   if (sub) {
-    await api('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
+    await api('/push?action=unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
     await sub.unsubscribe();
   }
   return { ok: true };
@@ -903,7 +903,7 @@ function NotificationToggle() {
   };
   const sendTest = async () => {
     setMsg('Sending…');
-    const r = await api('/push/test', { method: 'POST' });
+    const r = await api('/push?action=test', { method: 'POST' });
     setMsg(r.ok ? 'Sent — check your notifications.' : (r.data.error || 'Could not send.'));
   };
   const label = {
@@ -1308,7 +1308,7 @@ function App() {
   };
 
   const doLogin = async (email, password) => {
-    const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    const r = await api('/auth?action=login', { method: 'POST', body: JSON.stringify({ email, password }) });
     if (!r.ok) return { ok: false, error: r.data.error || 'Could not log in.' };
     const me = await api('/me');
     if (me.ok && me.data.user) {
@@ -1323,7 +1323,7 @@ function App() {
 
   const finishOnboarding = async (account) => {
     if (account) {
-      const s = await api('/auth/signup', { method: 'POST', body: JSON.stringify(account) });
+      const s = await api('/auth?action=signup', { method: 'POST', body: JSON.stringify(account) });
       if (!s.ok) return { ok: false, error: s.data.error || 'Could not create account.' };
       setUser(s.data.user);
     }
@@ -1347,7 +1347,7 @@ function App() {
   };
 
   const logout = async () => {
-    await api('/auth/logout', { method: 'POST' });
+    await api('/auth?action=logout', { method: 'POST' });
     setUser(null); setProfile(DEFAULT_PROFILE); setCheckin(null);
     setTab('today'); setPhase('welcome');
   };
