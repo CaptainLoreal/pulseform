@@ -960,32 +960,54 @@ const VIDEO_KINDS = [
   { id: 'rear',  name: 'Rear-on', hint: 'Best for foot strike & pronation' },
 ];
 
+// Lazy-load the Vercel Blob browser client (no bundler — pull the ESM build).
+let _blobClient = null;
+async function blobClient() {
+  if (_blobClient) return _blobClient;
+  _blobClient = await import('https://esm.sh/@vercel/blob@0.27.0/client');
+  return _blobClient;
+}
+
 function VideoCapture({ onSaved }) {
   const cameraRef = React.useRef(null);
   const fileRef = React.useRef(null);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState(null);   // null | 'reading' | 'uploading' | 'saving'
   const [err, setErr] = useState(null);
 
   const handle = async (file) => {
     if (!file) return;
-    setErr(null); setBusy(true);
+    setErr(null); setBusy(true); setStage('reading');
     try {
       const meta = await extractVideoMeta(file);
-      const localId = newLocalId();
-      await idbPut(localId, file);
+      setStage('uploading');
+      const { upload } = await blobClient();
+      // path is purely cosmetic — Blob adds a random suffix for uniqueness
+      const safeName = (file.name || 'clip.mp4').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60);
+      const blob = await upload(`videos/${safeName}`, file, {
+        access: 'public',
+        handleUploadUrl: '/api/videos?action=upload',
+        contentType: file.type || 'video/mp4',
+      });
+      setStage('saving');
       const body = {
-        local_id: localId, kind: 'side',
+        url: blob.url, path: blob.pathname, kind: 'side',
         duration_s: Math.round((meta.duration || 0) * 10) / 10,
         width: meta.width, height: meta.height, thumb: meta.thumb,
       };
       const r = await api('/videos', { method: 'POST', body: JSON.stringify(body) });
-      if (!r.ok) { await idbDel(localId); throw new Error(r.data.error || 'Could not save.'); }
+      if (!r.ok) throw new Error(r.data.error || 'Saved to storage but couldn’t write metadata.');
       onSaved && onSaved(r.data.video);
-    } catch (e) { setErr(e.message || 'Could not import that video.'); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setErr((e && e.message) || 'Could not upload that video.');
+    } finally { setBusy(false); setStage(null); }
   };
   const onCamera = (e) => { handle(e.target.files && e.target.files[0]); e.target.value = ''; };
   const onUpload = (e) => { handle(e.target.files && e.target.files[0]); e.target.value = ''; };
+  const label = stage === 'reading' ? 'Reading clip…'
+    : stage === 'uploading' ? 'Uploading…'
+    : stage === 'saving' ? 'Finalising…'
+    : 'Record analysis video';
 
   return (
     <div className="pf-vid-cta">
@@ -993,7 +1015,7 @@ function VideoCapture({ onSaved }) {
         onClick={() => cameraRef.current && cameraRef.current.click()} disabled={busy}>
         <span className="pf-vid-cta__ic"><Icon name="play" size={22} /></span>
         <span className="pf-vid-cta__body">
-          <span className="pf-vid-cta__t">{busy ? 'Processing…' : 'Record analysis video'}</span>
+          <span className="pf-vid-cta__t">{label}</span>
           <span className="pf-vid-cta__d">8–10 sec at steady pace</span>
         </span>
       </button>
@@ -1002,7 +1024,7 @@ function VideoCapture({ onSaved }) {
         <span className="pf-vid-cta__ic"><Icon name="plus" size={20} /></span>
         <span className="pf-vid-cta__body">
           <span className="pf-vid-cta__t">Upload from library</span>
-          <span className="pf-vid-cta__d">Pick an existing clip</span>
+          <span className="pf-vid-cta__d">Pick an existing clip · up to 200 MB</span>
         </span>
       </button>
       {err && <div className="pf-auth__err">{err}</div>}
@@ -1013,19 +1035,9 @@ function VideoCapture({ onSaved }) {
 }
 
 function VideoPlayer({ video, onClose, onDelete }) {
-  const [url, setUrl] = useState(null);
-  const [missing, setMissing] = useState(false);
-  useEffect(() => {
-    let active = true, objectUrl = null;
-    (async () => {
-      const blob = await idbGet(video.local_id).catch(() => null);
-      if (!active) return;
-      if (!blob) return setMissing(true);
-      objectUrl = URL.createObjectURL(blob);
-      setUrl(objectUrl);
-    })();
-    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [video.local_id]);
+  // Stream from the public Blob URL. Older clips (pre-Blob) only had a thumb;
+  // for those we show a friendly notice instead of a broken player.
+  const missing = !video.url;
   return (
     <>
       <div className="pf-sheet-scrim" onClick={onClose} />
@@ -1036,12 +1048,10 @@ function VideoPlayer({ video, onClose, onDelete }) {
         {missing ? (
           <div className="pf-vid-missing">
             <Icon name="info" size={20} />
-            <span>This video was recorded on another device — it isn’t stored here.</span>
+            <span>This clip predates cloud video storage and isn’t available anymore. Record a new one.</span>
           </div>
-        ) : url ? (
-          <video src={url} className="pf-vid-player" controls autoPlay playsInline muted />
         ) : (
-          <div className="pf-vid-player pf-vid-player--loading" />
+          <video src={video.url} className="pf-vid-player" controls autoPlay playsInline muted />
         )}
         <div className="pf-adapt-actions" style={{ marginTop: 14 }}>
           <Button block onClick={onClose}>Done</Button>
@@ -1059,7 +1069,6 @@ function VideoAnalysis() {
   useEffect(() => { load(); }, []);
   const onDelete = async (v) => {
     await api('/videos?id=' + v.id, { method: 'DELETE' });
-    await idbDel(v.local_id).catch(() => {});
     setPlaying(null); load();
   };
   return (
