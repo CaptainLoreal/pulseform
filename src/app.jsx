@@ -1154,15 +1154,243 @@ function ImportRuns() {
 /* ============================================================
    7 · You — profile
    ============================================================ */
-function You({ profile, user, onLogout }) {
+/* ---- This month stats — pulled from imported runs ---- */
+function MonthlyStats() {
+  const [runs, setRuns] = useState([]);
+  const [videos, setVideos] = useState([]);
+  useEffect(() => {
+    api('/runs').then(r => r.ok && setRuns(r.data.runs || []));
+    api('/videos').then(r => r.ok && setVideos(r.data.videos || []));
+  }, []);
+  const now = new Date();
+  const inThisMonth = (iso) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  };
+  const monthRuns = runs.filter(r => inThisMonth(r.started_at));
+  const monthVideos = videos.filter(v => inThisMonth(v.recorded_at));
+  const totalKm = monthRuns.reduce((s, r) => s + (+r.distance_m || 0) / 1000, 0);
+  const totalSec = monthRuns.reduce((s, r) => s + (+r.duration_s || 0), 0);
+  const longest = monthRuns.reduce((m, r) => Math.max(m, +r.distance_m || 0), 0) / 1000;
+  const monthName = now.toLocaleDateString(undefined, { month: 'long' });
+
+  const stats = [
+    { v: monthRuns.length, l: 'runs' },
+    { v: totalKm > 0 ? totalKm.toFixed(1) : '0', sub: 'km', l: 'this month' },
+    { v: longest > 0 ? longest.toFixed(1) : '0', sub: 'km', l: 'longest' },
+    { v: monthVideos.length, l: 'clips' },
+  ];
+  return (
+    <>
+      <div className="pf-section-label rise" style={{ '--d': '.1s' }}>{monthName} so far</div>
+      <Card className="rise" style={{ '--d': '.12s' }}>
+        <div className="pf-monstats">
+          {stats.map((s, i) => (
+            <div className="pf-monstat" key={i}>
+              <span className="pf-monstat__v">{s.v}{s.sub && <small> {s.sub}</small>}</span>
+              <span className="pf-monstat__l">{s.l}</span>
+            </div>
+          ))}
+        </div>
+        {monthRuns.length > 0 && totalKm > 0 && (
+          <div className="pf-monstats__foot">
+            Avg pace {fmtPace(totalKm * 1000, totalSec)} · {fmtDur(totalSec)} total time
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+/* ---- Profile edit sheet ---- */
+function ProfileEditSheet({ profile, onSave, onClose }) {
+  const [p, setP] = useState(profile);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const upd = (patch) => setP({ ...p, ...patch });
+  const toggleInjury = (i) => {
+    if (i === 'None') return upd({ injuries: ['None'] });
+    const next = (p.injuries || []).filter(x => x !== 'None');
+    upd({ injuries: next.includes(i) ? next.filter(x => x !== i) : [...next, i] });
+  };
+  const save = async () => {
+    setBusy(true); setErr(null);
+    const r = await api('/profile', { method: 'PUT', body: JSON.stringify({
+      name: p.name, sex: p.sex, age: p.age, height: p.height, weight: p.weight, restHr: p.restHr,
+      experience: p.experience, weekly: p.weekly, goal: p.goal, injuries: p.injuries || [], pain: p.pain || 0,
+    }) });
+    setBusy(false);
+    if (r.ok) { onSave(p); onClose(); }
+    else setErr(r.data.error || 'Could not save.');
+  };
+  return (
+    <>
+      <div className="pf-sheet-scrim" onClick={onClose} />
+      <div className="pf-sheet pf-sheet--tall">
+        <div className="pf-sheet__grab" />
+        <h3 className="pf-sheet__title">Edit profile</h3>
+        <p className="pf-sheet__sub">Update your baselines and goal.</p>
+
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Name</div>
+          <div className="pf-input-wrap"><input className="pf-input" value={p.name || ''} onChange={e => upd({ name: e.target.value })} placeholder="Your name" /></div>
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Sex</div>
+          <Segmented options={['Female', 'Male']} value={p.sex} set={v => upd({ sex: v })} />
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Age</div>
+          <Stepper value={p.age || 30} set={v => upd({ age: v })} min={14} max={90} unit=" yrs" />
+        </div>
+        <div className="pf-fields__row">
+          <div><div className="pf-sheet__lab">Height</div><Stepper value={p.height || 170} set={v => upd({ height: v })} min={130} max={210} unit=" cm" /></div>
+          <div><div className="pf-sheet__lab">Weight</div><Stepper value={p.weight || 70} set={v => upd({ weight: v })} min={35} max={160} unit=" kg" /></div>
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Resting heart rate</div>
+          <Stepper value={p.restHr || 60} set={v => upd({ restHr: v })} min={35} max={90} unit=" bpm" />
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Experience</div>
+          <Segmented options={EXPERIENCE} value={p.experience} set={v => upd({ experience: v })} />
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-slider__top"><span className="pf-slider__lab">Weekly distance</span><span className="pf-slider__num">{p.weekly || 0} km</span></div>
+          <input type="range" className="pf-range" min="0" max="100" value={p.weekly || 0} onChange={e => upd({ weekly: +e.target.value })} />
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Goal</div>
+          {GOALS.map(g => (
+            <button key={g.id} className={cx('pf-opt', p.goal === g.id && 'pf-opt--on')} onClick={() => upd({ goal: g.id })}>
+              <span className="pf-opt__ic"><Icon name={g.icon} size={20} /></span>
+              <span className="pf-opt__body"><span className="pf-opt__name">{g.name}</span><span className="pf-opt__desc">{g.desc}</span></span>
+              <span className="pf-opt__check">{p.goal === g.id && <Icon name="check" size={14} />}</span>
+            </button>
+          ))}
+        </div>
+        <div className="pf-sheet__group">
+          <div className="pf-sheet__lab">Injury history</div>
+          <div className="pf-chips">
+            {INJURIES.map(i => (
+              <button key={i} className={cx('pf-chip', (p.injuries || []).includes(i) && 'pf-chip--on')} onClick={() => toggleInjury(i)}>{i}</button>
+            ))}
+          </div>
+        </div>
+
+        {err && <div className="pf-auth__err" style={{ marginBottom: 12 }}>{err}</div>}
+        <Button size="lg" block disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</Button>
+        <div style={{ height: 6 }} />
+        <Button variant="ghost" block onClick={onClose}>Cancel</Button>
+      </div>
+    </>
+  );
+}
+
+/* ---- Units & display sheet ---- */
+const UNIT_KEY = 'pf_units';
+const getUnits = () => (typeof localStorage !== 'undefined' ? (localStorage.getItem(UNIT_KEY) || 'metric') : 'metric');
+function UnitsSheet({ onClose }) {
+  const [units, setUnits] = useState(getUnits());
+  const set = (u) => { setUnits(u); try { localStorage.setItem(UNIT_KEY, u); } catch (e) {} };
+  return (
+    <>
+      <div className="pf-sheet-scrim" onClick={onClose} />
+      <div className="pf-sheet">
+        <div className="pf-sheet__grab" />
+        <h3 className="pf-sheet__title">Units &amp; display</h3>
+        <p className="pf-sheet__sub">How distances, weights and pace are shown.</p>
+        <div className="pf-sheet__group">
+          <Segmented options={['Metric', 'Imperial']} value={units === 'metric' ? 'Metric' : 'Imperial'} set={v => set(v === 'Metric' ? 'metric' : 'imperial')} />
+          <p className="pf-sheet__hint">{units === 'metric' ? 'km · cm · kg · min/km' : 'mi · ft/in · lb · min/mi'}</p>
+        </div>
+        <Button size="lg" block onClick={onClose}>Done</Button>
+      </div>
+    </>
+  );
+}
+
+/* ---- Privacy & data sheet ---- */
+function PrivacySheet({ onClose, onLogout }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const exportData = async () => {
+    setMsg('Building export…');
+    const [me, runs, videos, checkin] = await Promise.all([
+      api('/me'), api('/runs'), api('/videos'), api('/checkins'),
+    ]);
+    const bundle = {
+      exportedAt: new Date().toISOString(),
+      profile: me.data || null,
+      runs: (runs.data && runs.data.runs) || [],
+      videos: (videos.data && videos.data.videos) || [],
+      todaysCheckin: (checkin.data && checkin.data.checkin) || null,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `pulseform-export-${Date.now()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMsg('Export downloaded.');
+  };
+  const deleteAccount = async () => {
+    if (!confirm) return setConfirm(true);
+    setBusy(true);
+    const r = await api('/profile?action=delete-account', { method: 'DELETE' });
+    setBusy(false);
+    if (r.ok) { onLogout && onLogout(); }
+    else { setMsg(r.data.error || 'Could not delete. Try again.'); }
+  };
+  return (
+    <>
+      <div className="pf-sheet-scrim" onClick={onClose} />
+      <div className="pf-sheet">
+        <div className="pf-sheet__grab" />
+        <h3 className="pf-sheet__title">Privacy &amp; data</h3>
+        <p className="pf-sheet__sub">Your data stays in your account on Vercel Postgres + Blob. You can export or delete it any time.</p>
+
+        <div className="pf-sheet__group">
+          <button className="pf-vid-cta__btn" onClick={exportData} disabled={busy}>
+            <span className="pf-vid-cta__ic"><Icon name="check" size={20} /></span>
+            <span className="pf-vid-cta__body">
+              <span className="pf-vid-cta__t">Export my data</span>
+              <span className="pf-vid-cta__d">JSON download of profile, runs, videos &amp; check-ins</span>
+            </span>
+          </button>
+        </div>
+
+        <div className="pf-sheet__group">
+          <button className={cx('pf-vid-cta__btn', confirm && 'pf-vid-cta__btn--danger')} onClick={deleteAccount} disabled={busy}>
+            <span className="pf-vid-cta__ic" style={{ background: 'var(--strain-50)', color: 'var(--strain-600)' }}><Icon name="x" size={20} /></span>
+            <span className="pf-vid-cta__body">
+              <span className="pf-vid-cta__t">{confirm ? (busy ? 'Deleting…' : 'Tap again to confirm') : 'Delete account'}</span>
+              <span className="pf-vid-cta__d">{confirm ? 'This removes your account, runs, videos and check-ins permanently.' : 'Permanent — no undo'}</span>
+            </span>
+          </button>
+        </div>
+
+        {msg && <div className="pf-sheet__hint" style={{ marginBottom: 10 }}>{msg}</div>}
+        <Button variant="ghost" block onClick={onClose}>Done</Button>
+      </div>
+    </>
+  );
+}
+
+function You({ profile, setProfile, user, onLogout }) {
   const goal = GOALS.find(g => g.id === profile.goal);
+  const [sheet, setSheet] = useState(null); // null | 'profile' | 'units' | 'privacy'
+  const sensorPaired = false; // honest: no real sensor in this build
+
   return (
     <div className="pf-screen">
       <div className="pf-scroll">
-        <header className="pf-apphead rise"><h2 className="pf-apphead__title">You</h2><Icon name="sliders" size={22} /></header>
+        <header className="pf-apphead rise"><h2 className="pf-apphead__title">You</h2></header>
 
         <div className="pf-profile-head rise" style={{ '--d': '.04s' }}>
-          <Avatar name={profile.name || 'Jordan Diaz'} size="lg" />
+          <Avatar name={profile.name || 'Runner'} size="lg" />
           <div className="pf-profile-head__meta">
             <h2>{profile.name || 'Runner'}</h2>
             <p>{user?.email || (goal ? goal.name : 'Runner')}</p>
@@ -1171,25 +1399,38 @@ function You({ profile, user, onLogout }) {
 
         <Card className="rise" style={{ '--d': '.08s' }}>
           <div className="pf-sensor-card">
-            <span className="pf-sensor-card__ic"><Icon name="bluetooth" size={22} /></span>
+            <span className="pf-sensor-card__ic" style={!sensorPaired ? { background: 'var(--surface-sunken)', color: 'var(--text-muted)' } : undefined}>
+              <Icon name="bluetooth" size={22} />
+            </span>
             <div style={{ flex: 1 }}>
               <div className="pf-sessrow__t">Pulseform sensor</div>
-              <div className="pf-sessrow__d"><span className="pf-livedot" style={{ marginRight: 6 }} />Connected · 100%</div>
+              <div className="pf-sessrow__d">
+                {sensorPaired
+                  ? <><span className="pf-livedot" style={{ marginRight: 6 }} />Connected · 100%</>
+                  : 'Not paired — bring your strap close to pair'}
+              </div>
             </div>
-            <Badge tone="ready" dot>Live</Badge>
+            {sensorPaired
+              ? <Badge tone="ready" dot>Live</Badge>
+              : <Button variant="subtle" size="sm">Pair</Button>}
           </div>
         </Card>
 
-        <div className="pf-section-label rise" style={{ '--d': '.1s' }}>Your data</div>
-        <div className="pf-list rise" style={{ '--d': '.12s' }}>
+        <MonthlyStats />
+
+        <div className="pf-section-label rise" style={{ '--d': '.14s' }}>
+          Your data
+          <button className="pf-section-label__link" onClick={() => setSheet('profile')}>Edit</button>
+        </div>
+        <div className="pf-list rise" style={{ '--d': '.16s' }}>
           {[
-            ['user', 'Profile & baselines', `${profile.age} yrs · ${profile.height} cm · ${profile.weight} kg`],
-            ['heart', 'Resting heart rate', `${profile.restHr} bpm`],
+            ['user', 'Profile & baselines', `${profile.name || 'Runner'} · ${profile.age || '—'} yrs · ${profile.height || '—'} cm · ${profile.weight || '—'} kg`],
+            ['heart', 'Resting heart rate', `${profile.restHr || '—'} bpm`],
             ['target', 'Goal', goal ? goal.name : '—'],
-            ['shield', 'Injury history', profile.injuries.join(', ') || 'None'],
-            ['gauge', 'Weekly distance', `${profile.weekly} km`],
+            ['shield', 'Injury history', (profile.injuries || []).join(', ') || 'None'],
+            ['gauge', 'Weekly distance', `${profile.weekly || 0} km`],
           ].map(([ic, t, val], i) => (
-            <div className="pf-list__row" key={i}>
+            <div className="pf-list__row" key={i} onClick={() => setSheet('profile')} style={{ cursor: 'pointer' }}>
               <span className="pf-list__ic"><Icon name={ic} size={18} /></span>
               <div className="pf-list__body"><div className="pf-list__t">{t}</div><div className="pf-list__d">{val}</div></div>
               <Icon name="chevronRight" size={18} className="pf-drill__chev" />
@@ -1197,16 +1438,19 @@ function You({ profile, user, onLogout }) {
           ))}
         </div>
 
-        <div className="pf-section-label rise" style={{ '--d': '.14s' }}>Settings</div>
-        <div className="pf-list rise" style={{ '--d': '.16s' }}>
+        <div className="pf-section-label rise" style={{ '--d': '.18s' }}>Settings</div>
+        <div className="pf-list rise" style={{ '--d': '.2s' }}>
           <NotificationToggle />
-          {[['sliders', 'Units & display', 'Metric'], ['shield', 'Privacy & data', 'On-device first']].map(([ic, t, d], i) => (
-            <div className="pf-list__row" key={i}>
-              <span className="pf-list__ic"><Icon name={ic} size={18} /></span>
-              <div className="pf-list__body"><div className="pf-list__t">{t}</div><div className="pf-list__d">{d}</div></div>
-              <Icon name="chevronRight" size={18} className="pf-drill__chev" />
-            </div>
-          ))}
+          <div className="pf-list__row" onClick={() => setSheet('units')} style={{ cursor: 'pointer' }}>
+            <span className="pf-list__ic"><Icon name="sliders" size={18} /></span>
+            <div className="pf-list__body"><div className="pf-list__t">Units &amp; display</div><div className="pf-list__d">{getUnits() === 'metric' ? 'Metric · km · kg · °C' : 'Imperial · mi · lb · °F'}</div></div>
+            <Icon name="chevronRight" size={18} className="pf-drill__chev" />
+          </div>
+          <div className="pf-list__row" onClick={() => setSheet('privacy')} style={{ cursor: 'pointer' }}>
+            <span className="pf-list__ic"><Icon name="shield" size={18} /></span>
+            <div className="pf-list__body"><div className="pf-list__t">Privacy &amp; data</div><div className="pf-list__d">Export or delete your data</div></div>
+            <Icon name="chevronRight" size={18} className="pf-drill__chev" />
+          </div>
         </div>
 
         <ImportRuns />
@@ -1216,6 +1460,10 @@ function You({ profile, user, onLogout }) {
         </div>
         <div className="pf-scroll__pad" />
       </div>
+
+      {sheet === 'profile' && <ProfileEditSheet profile={profile} onSave={setProfile} onClose={() => setSheet(null)} />}
+      {sheet === 'units' && <UnitsSheet onClose={() => setSheet(null)} />}
+      {sheet === 'privacy' && <PrivacySheet onClose={() => setSheet(null)} onLogout={onLogout} />}
     </div>
   );
 }
@@ -1387,7 +1635,7 @@ function App() {
         goForm={() => setTab('form')} goCardio={() => setTab('today')} openCheckin={() => setSheet(true)} />,
       form: <Form goPlan={() => setTab('plan')} />,
       plan: <Plan runReady={runReady} onStart={() => setSheet('started')} />,
-      you: <You profile={profile} user={user} onLogout={logout} />,
+      you: <You profile={profile} setProfile={setProfile} user={user} onLogout={logout} />,
     };
     screen = (
       <>

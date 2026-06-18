@@ -1,13 +1,29 @@
 const db = require('../lib/db');
-const { getUser } = require('../lib/auth');
+const { getUser, clearSessionCookie } = require('../lib/auth');
 const { json, readBody } = require('../lib/http');
 
-// GET → current profile.  PUT → upsert onboarding data (marks onboarded).
+// GET → current profile.  PUT → upsert onboarding data.
+// DELETE ?action=delete-account → cascade-delete the user and clear session.
 module.exports = async (req, res) => {
   const sess = getUser(req);
   if (!sess) return json(res, 401, { error: 'Not signed in.' });
+  const action = (req.query && req.query.action) || '';
 
   try {
+    if (req.method === 'DELETE' && action === 'delete-account') {
+      // Best-effort: remove any video blobs before the row cascades away.
+      try {
+        const { rows } = await db.query('select url from videos where user_id = $1 and url is not null', [sess.uid]);
+        if (rows.length) {
+          const { del } = require('@vercel/blob');
+          await Promise.all(rows.map(r => del(r.url).catch(() => {})));
+        }
+      } catch (e) { /* table may not exist yet — ignore */ }
+      await db.query('delete from users where id = $1', [sess.uid]);
+      clearSessionCookie(res);
+      return json(res, 200, { ok: true });
+    }
+
     if (req.method === 'GET') {
       const { rows } = await db.query(
         `select name, sex, age, height, weight, rest_hr, experience, weekly, goal, injuries, pain, onboarded

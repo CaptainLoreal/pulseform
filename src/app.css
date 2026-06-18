@@ -691,3 +691,37 @@ input[type=range].pf-range::-webkit-slider-thumb {
   background: var(--surface-sunken); border-radius: var(--radius-lg);
   font-size: 14px; color: var(--text-muted); line-height: 1.45;
 }
+
+/* ---------------------------------------------------------------
+   Monthly stats card (You screen)
+   --------------------------------------------------------------- */
+.pf-monstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.pf-monstat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pf-monstat__v {
+  font-family: var(--font-display); font-weight: 800; font-size: 24px;
+  letter-spacing: -0.03em; color: var(--text-strong); line-height: 1; font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: baseline; gap: 3px;
+}
+.pf-monstat__v small {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 400;
+  color: var(--text-faint); letter-spacing: 0;
+}
+.pf-monstat__l {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
+}
+.pf-monstats__foot {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle);
+  font-size: 13px; color: var(--text-muted);
+}
+
+/* Tall variant of the bottom sheet — fits the multi-field profile editor */
+.pf-sheet--tall { max-height: 92%; }
+.pf-sheet__hint { font-size: 12px; color: var(--text-muted); margin: 8px 2px 0; line-height: 1.4; }
+
+/* Danger state on a CTA-style button (used by Delete account confirm) */
+.pf-vid-cta__btn--danger {
+  border-color: var(--strain-500); background: var(--strain-50);
+  box-shadow: 0 0 0 3px var(--strain-50);
+}
+.pf-vid-cta__btn--danger .pf-vid-cta__t { color: var(--strain-600); }
