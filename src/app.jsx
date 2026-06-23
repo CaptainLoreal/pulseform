@@ -1554,30 +1554,44 @@ const ADMIN_VIEWS = [
 const adminApi = (path, opts) => api('/admin' + path, opts);
 
 function AdminShell({ user, onExit, children, view, setView }) {
+  // Fills the full viewport (the App-level branch bypasses the .device mockup
+  // wrapper when admin is mounted), with a 1200-px centred content column.
   return (
-    <div className="pf-screen" style={{ background: 'var(--surface-canvas)' }}>
-      <div className="pf-scroll" style={{ paddingBottom: 60 }}>
-        <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 18px 6px' }}>
-          <button className="pf-iconbtn" onClick={onExit} aria-label="Exit admin"><Icon name="arrowLeft" size={18} /></button>
+    <div style={{
+      minHeight: '100vh', width: '100%', background: 'var(--surface-canvas)',
+      color: 'var(--text-strong)', overflowY: 'auto',
+    }}>
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        background: 'var(--surface-canvas)', borderBottom: '1px solid var(--border-subtle)',
+      }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '14px 28px',
+                       display: 'flex', alignItems: 'center', gap: 14 }}>
+          <button className="pf-iconbtn" onClick={onExit} aria-label="Exit admin">
+            <Icon name="arrowLeft" size={18} />
+          </button>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>
+            <div style={{ fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase',
+                          color: 'var(--text-faint)', fontWeight: 700 }}>
               Pulseform · admin
             </div>
-            <div style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{user.email}</div>
+            <div style={{ fontWeight: 700 }}>{user.email}</div>
           </div>
-        </header>
-        <div style={{ display: 'flex', gap: 6, padding: '6px 14px 12px', overflowX: 'auto' }}>
-          {ADMIN_VIEWS.map(([id, label]) => (
-            <button key={id} onClick={() => setView(id)}
-              style={{
-                padding: '8px 12px', borderRadius: 999, border: '1px solid var(--border-subtle)',
-                background: view === id ? 'var(--text-strong)' : 'var(--surface-card)',
-                color: view === id ? 'white' : 'var(--text-strong)',
-                fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
-              }}>{label}</button>
-          ))}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {ADMIN_VIEWS.map(([id, label]) => (
+              <button key={id} onClick={() => setView(id)}
+                style={{
+                  padding: '8px 14px', borderRadius: 999, border: '1px solid var(--border-subtle)',
+                  background: view === id ? 'var(--text-strong)' : 'var(--surface-card)',
+                  color: view === id ? 'white' : 'var(--text-strong)',
+                  fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
+                }}>{label}</button>
+            ))}
+          </div>
         </div>
-        <div style={{ padding: '0 14px' }}>{children}</div>
+      </div>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 28px 60px' }}>
+        {children}
       </div>
     </div>
   );
@@ -1605,7 +1619,7 @@ function AdminDashboard() {
   const maxSignup = Math.max(1, ...s.signups_14d.map(d => d.count));
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
         <AdminStatTile label="Users" value={s.users} sub={`${s.onboarded} onboarded · ${s.admins} admin · ${s.suspended} suspended`} />
         <AdminStatTile label="Check-ins today" value={s.checkins_today} sub={`${s.checkins_total} total`} />
         <AdminStatTile label="Runs imported" value={s.runs} />
@@ -2078,12 +2092,16 @@ function App() {
     setTab('today'); setPhase('welcome');
   };
 
+  // Admin panel is desktop-sized — render it OUTSIDE the iPhone mockup frame.
+  if (!booting && phase === 'app' && hash === '#admin' && user?.role === 'admin') {
+    return <AdminPanel user={user} onExit={exitAdmin} />;
+  }
+
   let screen;
   if (booting) screen = <Splash />;
   else if (phase === 'welcome') screen = <Welcome onStart={() => setPhase('onboarding')} onLogin={() => setPhase('login')} />;
   else if (phase === 'login') screen = <Login onLogin={doLogin} onBack={() => setPhase('welcome')} onCreate={() => setPhase('onboarding')} />;
   else if (phase === 'onboarding') screen = <Onboarding profile={profile} setProfile={setProfile} authed={!!user} onFinish={finishOnboarding} onExit={() => (user ? logout() : setPhase('welcome'))} />;
-  else if (hash === '#admin' && user?.role === 'admin') screen = <AdminPanel user={user} onExit={exitAdmin} />;
   else {
     const tabs = {
       today: <Today profile={profile} checkin={checkin} runReady={runReady} symptoms={symptoms}
