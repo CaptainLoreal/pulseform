@@ -31,10 +31,13 @@ async function login(req, res) {
   const { email, password } = await readBody(req);
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) return json(res, 400, { error: 'Email and password required.' });
-  const { rows } = await db.query('select id, email, password_hash from users where email = $1', [e]);
+  const { rows } = await db.query('select id, email, password_hash, suspended from users where email = $1', [e]);
   const user = rows[0];
   if (!user || !(await verifyPassword(password, user.password_hash))) {
     return json(res, 401, { error: 'Wrong email or password.' });
+  }
+  if (user.suspended) {
+    return json(res, 403, { error: 'This account has been suspended. Contact support.' });
   }
   setSessionCookie(res, signSession({ uid: user.id, email: user.email }));
   return json(res, 200, { user: { id: user.id, email: user.email } });

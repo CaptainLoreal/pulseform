@@ -1451,6 +1451,13 @@ function You({ profile, setProfile, user, onLogout }) {
             <div className="pf-list__body"><div className="pf-list__t">Privacy &amp; data</div><div className="pf-list__d">Export or delete your data</div></div>
             <Icon name="chevronRight" size={18} className="pf-drill__chev" />
           </div>
+          {user?.role === 'admin' && (
+            <div className="pf-list__row" onClick={() => { window.location.hash = '#admin'; }} style={{ cursor: 'pointer' }}>
+              <span className="pf-list__ic"><Icon name="cpu" size={18} /></span>
+              <div className="pf-list__body"><div className="pf-list__t">Admin back-office</div><div className="pf-list__d">Users · content · push · formulas</div></div>
+              <Icon name="chevronRight" size={18} className="pf-drill__chev" />
+            </div>
+          )}
         </div>
 
         <ImportRuns />
@@ -1535,6 +1542,445 @@ function Splash() {
   );
 }
 
+/* ============================================================
+   Admin back-office (gated on user.role === 'admin', mounted at #admin)
+   ============================================================ */
+const ADMIN_VIEWS = [
+  ['dashboard', 'Dashboard'],
+  ['users',     'Users'],
+  ['push',      'Push'],
+  ['formulas',  'How scores work'],
+];
+const adminApi = (path, opts) => api('/admin' + path, opts);
+
+function AdminShell({ user, onExit, children, view, setView }) {
+  return (
+    <div className="pf-screen" style={{ background: 'var(--surface-canvas)' }}>
+      <div className="pf-scroll" style={{ paddingBottom: 60 }}>
+        <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 18px 6px' }}>
+          <button className="pf-iconbtn" onClick={onExit} aria-label="Exit admin"><Icon name="arrowLeft" size={18} /></button>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>
+              Pulseform · admin
+            </div>
+            <div style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{user.email}</div>
+          </div>
+        </header>
+        <div style={{ display: 'flex', gap: 6, padding: '6px 14px 12px', overflowX: 'auto' }}>
+          {ADMIN_VIEWS.map(([id, label]) => (
+            <button key={id} onClick={() => setView(id)}
+              style={{
+                padding: '8px 12px', borderRadius: 999, border: '1px solid var(--border-subtle)',
+                background: view === id ? 'var(--text-strong)' : 'var(--surface-card)',
+                color: view === id ? 'white' : 'var(--text-strong)',
+                fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
+              }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ padding: '0 14px' }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function AdminStatTile({ label, value, sub }) {
+  return (
+    <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: 12, minWidth: 0 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-strong)', lineHeight: 1.1, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function AdminDashboard() {
+  const [s, setS] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => { (async () => {
+    const r = await adminApi('?action=stats');
+    if (r.ok) setS(r.data); else setErr(r.data.error || 'Failed to load stats.');
+  })(); }, []);
+  if (err) return <div style={{ color: 'var(--strain-500)' }}>{err}</div>;
+  if (!s) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
+  const maxSignup = Math.max(1, ...s.signups_14d.map(d => d.count));
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+        <AdminStatTile label="Users" value={s.users} sub={`${s.onboarded} onboarded · ${s.admins} admin · ${s.suspended} suspended`} />
+        <AdminStatTile label="Check-ins today" value={s.checkins_today} sub={`${s.checkins_total} total`} />
+        <AdminStatTile label="Runs imported" value={s.runs} />
+        <AdminStatTile label="Videos" value={s.videos} />
+        <AdminStatTile label="Push subscriptions" value={s.push_subscriptions} sub="across all devices" />
+        <AdminStatTile label="Engagement" value={`${s.users ? Math.round(100 * s.checkins_today / s.users) : 0}%`} sub="checked in today" />
+      </div>
+      <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 8 }}>Signups · last 14 days</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 90 }}>
+          {s.signups_14d.map(d => (
+            <div key={d.day} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <div title={`${d.day}: ${d.count}`}
+                style={{ width: '100%', background: 'var(--teal-300, #5fd3c4)', borderRadius: 4,
+                         height: `${Math.round(70 * d.count / maxSignup)}px`, minHeight: 2, opacity: d.count ? 1 : 0.25 }} />
+              <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>{d.day.slice(8)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminUsers({ onPick }) {
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(0);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => { (async () => {
+    setErr(null);
+    const r = await adminApi(`?action=users&q=${encodeURIComponent(q)}&page=${page}&pageSize=25`);
+    if (r.ok) setData(r.data); else setErr(r.data.error || 'Failed to load users.');
+  })(); }, [q, page]);
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <input className="pf-input" placeholder="Search by email…" value={q}
+        onChange={e => { setPage(0); setQ(e.target.value); }}
+        style={{ width: '100%' }} />
+      {err && <div style={{ color: 'var(--strain-500)' }}>{err}</div>}
+      {!data ? <div style={{ color: 'var(--text-muted)' }}>Loading…</div> : (
+        <>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{data.total} total · page {page + 1}</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {data.users.map(u => (
+              <button key={u.id} onClick={() => onPick(u.id)}
+                style={{ textAlign: 'left', padding: 12, background: 'var(--surface-card)',
+                         border: '1px solid var(--border-subtle)', borderRadius: 12, cursor: 'pointer' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email}</div>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    {u.role === 'admin' && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: 'var(--teal-300, #5fd3c4)', color: '#06382f', fontWeight: 700 }}>ADMIN</span>}
+                    {u.suspended && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: 'var(--strain-500, #d6584a)', color: 'white', fontWeight: 700 }}>SUSPENDED</span>}
+                    {!u.onboarded && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: 'var(--surface-sunken)', color: 'var(--text-muted)', fontWeight: 700 }}>NEW</span>}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {u.name || '—'} · {u.checkins_count} check-ins
+                  {u.last_checkin_day ? ` · last ${u.last_checkin_day}` : ''}
+                  {' · '}joined {new Date(u.created_at).toLocaleDateString()}
+                </div>
+              </button>
+            ))}
+            {!data.users.length && <div style={{ color: 'var(--text-muted)', padding: 12 }}>No users match.</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>Prev</Button>
+            <Button variant="secondary" size="sm" disabled={(page + 1) * 25 >= data.total} onClick={() => setPage(p => p + 1)}>Next</Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminPushComposer({ targetUserId, onSent }) {
+  const [title, setTitle] = useState('Pulseform');
+  const [body, setBody] = useState('');
+  const [url, setUrl] = useState('/');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const send = async () => {
+    if (busy || !body.trim()) return;
+    setBusy(true); setMsg(null);
+    const action = targetUserId ? `push-user&id=${targetUserId}` : 'push-all';
+    const r = await adminApi(`?action=${action}`, { method: 'POST', body: JSON.stringify({ title, body, url }) });
+    setBusy(false);
+    setMsg(r.ok ? `Sent ${r.data.sent}${r.data.candidates ? '/' + r.data.candidates : ''}.${(r.data.errors || []).length ? ' Errors: ' + r.data.errors.join('; ') : ''}` : (r.data.error || 'Failed.'));
+    if (r.ok && onSent) onSent();
+  };
+  return (
+    <div style={{ display: 'grid', gap: 8, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-strong)' }}>
+        {targetUserId ? 'Send to this user' : 'Broadcast to everyone with notifications on'}
+      </div>
+      <input className="pf-input" placeholder="Title (e.g. Pulseform)" value={title} onChange={e => setTitle(e.target.value)} />
+      <textarea className="pf-input" placeholder="Body" value={body} onChange={e => setBody(e.target.value)} rows={3} style={{ resize: 'vertical' }} />
+      <input className="pf-input" placeholder="URL when tapped (default /)" value={url} onChange={e => setUrl(e.target.value)} />
+      <Button size="sm" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Sending…' : 'Send'}</Button>
+      {msg && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{msg}</div>}
+    </div>
+  );
+}
+
+function AdminUserDetail({ userId, onBack, onChanged }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => {
+    setErr(null);
+    const r = await adminApi(`?action=user&id=${userId}`);
+    if (r.ok) setD(r.data); else setErr(r.data.error || 'Failed to load user.');
+  };
+  useEffect(() => { refresh(); }, [userId]);
+  const act = async (fn, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBusy(true); setErr(null);
+    const r = await fn();
+    setBusy(false);
+    if (!r.ok) { setErr(r.data.error || 'Action failed.'); return; }
+    if (onChanged) onChanged();
+    refresh();
+  };
+  const doSuspend = () => {
+    const reason = window.prompt('Reason for suspension (optional):', '');
+    if (reason === null) return;
+    act(() => adminApi(`?action=suspend&id=${userId}`, { method: 'POST', body: JSON.stringify({ reason }) }));
+  };
+  const doUnsuspend = () => act(() => adminApi(`?action=unsuspend&id=${userId}`, { method: 'POST', body: '{}' }));
+  const doDelete = () => act(() => adminApi(`?action=delete-user&id=${userId}`, { method: 'DELETE' }),
+    'This permanently deletes the user and all their data (check-ins, runs, videos). Continue?');
+  const doReset = () => {
+    const pw = window.prompt('New password (min 6 chars):', '');
+    if (!pw) return;
+    act(() => adminApi(`?action=reset-password&id=${userId}`, { method: 'POST', body: JSON.stringify({ password: pw }) }));
+  };
+  const doPromote = () => act(() => adminApi(`?action=set-role&id=${userId}`, { method: 'POST', body: JSON.stringify({ role: 'admin' }) }),
+    'Make this user an admin? They will gain full back-office access.');
+  const doDemote  = () => act(() => adminApi(`?action=set-role&id=${userId}`, { method: 'POST', body: JSON.stringify({ role: 'user' }) }));
+  const delVideo   = (id) => act(() => adminApi(`?action=delete-video&id=${id}`, { method: 'DELETE' }), 'Delete this video?');
+  const delCheckin = (id) => act(() => adminApi(`?action=delete-checkin&id=${id}`, { method: 'DELETE' }), 'Delete this check-in?');
+  const delRun     = (id) => act(() => adminApi(`?action=delete-run&id=${id}`, { method: 'DELETE' }), 'Delete this run?');
+
+  if (err) return <div><Button size="sm" variant="ghost" onClick={onBack}>← Back</Button><div style={{ color: 'var(--strain-500)', marginTop: 8 }}>{err}</div></div>;
+  if (!d) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
+  const u = d.user, p = d.profile;
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <Button size="sm" variant="ghost" onClick={onBack}>← Back to users</Button>
+      <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 800, color: 'var(--text-strong)' }}>{u.email}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Joined {new Date(u.created_at).toLocaleDateString()} · {d.push_subscriptions} push device(s)</div>
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+            {u.role === 'admin' && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: 'var(--teal-300, #5fd3c4)', color: '#06382f', fontWeight: 700 }}>ADMIN</span>}
+            {u.suspended && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: 'var(--strain-500, #d6584a)', color: 'white', fontWeight: 700 }}>SUSPENDED</span>}
+          </div>
+        </div>
+        {u.suspended && u.suspended_reason && (
+          <div style={{ marginTop: 8, padding: 8, background: 'var(--surface-sunken)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+            Reason: {u.suspended_reason}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+          {!u.suspended ? <Button size="sm" variant="secondary" disabled={busy} onClick={doSuspend}>Suspend</Button>
+                        : <Button size="sm" variant="secondary" disabled={busy} onClick={doUnsuspend}>Unsuspend</Button>}
+          {u.role !== 'admin' ? <Button size="sm" variant="secondary" disabled={busy} onClick={doPromote}>Make admin</Button>
+                              : <Button size="sm" variant="secondary" disabled={busy} onClick={doDemote}>Demote</Button>}
+          <Button size="sm" variant="secondary" disabled={busy} onClick={doReset}>Reset password</Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={doDelete}>Delete account</Button>
+        </div>
+      </div>
+
+      <AdminPushComposer targetUserId={u.id} />
+
+      <details style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 12 }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Profile {p?.onboarded ? '· onboarded' : '· not onboarded yet'}</summary>
+        {p ? (
+          <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-muted)', display: 'grid', gap: 4 }}>
+            <div>Name: {p.name || '—'}</div>
+            <div>Sex: {p.sex || '—'} · Age: {p.age ?? '—'} · Height: {p.height ?? '—'} cm · Weight: {p.weight ?? '—'} kg</div>
+            <div>Resting HR: {p.rest_hr ?? '—'} bpm · Experience: {p.experience || '—'} · Weekly: {p.weekly ?? '—'} km</div>
+            <div>Goal: {p.goal || '—'} · Pain: {p.pain ?? '—'}/10 · Injuries: {(p.injuries || []).join(', ') || 'None'}</div>
+            <div>Updated: {p.updated_at ? new Date(p.updated_at).toLocaleString() : '—'}</div>
+          </div>
+        ) : <div style={{ marginTop: 8, color: 'var(--text-muted)' }}>No profile row.</div>}
+      </details>
+
+      <details style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 12 }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Check-ins ({d.checkins.length})</summary>
+        <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 12 }}>
+          {d.checkins.map(c => (
+            <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', background: 'var(--surface-sunken)', borderRadius: 8 }}>
+              <div>
+                <b>{c.day}</b> · sleep {c.sleep}/5 · sore {c.soreness}/5 · pain {c.pain || '—'} · sym {c.symptoms}/100 · ready {c.run_ready}/100
+              </div>
+              <button onClick={() => delCheckin(c.id)} style={{ background: 'none', border: 'none', color: 'var(--strain-500)', cursor: 'pointer', fontSize: 12 }}>×</button>
+            </div>
+          ))}
+          {!d.checkins.length && <div style={{ color: 'var(--text-muted)' }}>No check-ins yet.</div>}
+        </div>
+      </details>
+
+      <details style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 12 }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Runs ({d.runs.length})</summary>
+        <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 12 }}>
+          {d.runs.map(r => (
+            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', background: 'var(--surface-sunken)', borderRadius: 8 }}>
+              <div>{fmtDate(r.started_at)} · {((r.distance_m || 0) / 1000).toFixed(2)} km · {fmtDur(r.duration_s)} · {fmtPace(r.distance_m, r.duration_s)} · HR {r.avg_hr || '—'}</div>
+              <button onClick={() => delRun(r.id)} style={{ background: 'none', border: 'none', color: 'var(--strain-500)', cursor: 'pointer', fontSize: 12 }}>×</button>
+            </div>
+          ))}
+          {!d.runs.length && <div style={{ color: 'var(--text-muted)' }}>No runs.</div>}
+        </div>
+      </details>
+
+      <details style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 12 }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Videos ({d.videos.length})</summary>
+        <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 12 }}>
+          {d.videos.map(v => (
+            <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', background: 'var(--surface-sunken)', borderRadius: 8 }}>
+              <div>{fmtDate(v.recorded_at)} · {v.kind || 'video'} · {v.duration_s ? `${Math.round(v.duration_s)}s` : '—'} · {v.width}×{v.height} {v.url ? '· uploaded' : '· local'}</div>
+              <button onClick={() => delVideo(v.id)} style={{ background: 'none', border: 'none', color: 'var(--strain-500)', cursor: 'pointer', fontSize: 12 }}>×</button>
+            </div>
+          ))}
+          {!d.videos.length && <div style={{ color: 'var(--text-muted)' }}>No videos.</div>}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function AdminFormulas() {
+  const box = { background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: 14, display: 'grid', gap: 8 };
+  const code = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12,
+                 padding: '8px 10px', background: 'var(--surface-sunken)', borderRadius: 8, overflowX: 'auto', whiteSpace: 'pre' };
+  const small = { fontSize: 12, color: 'var(--text-muted)' };
+  const h = { fontWeight: 800, color: 'var(--text-strong)', fontSize: 15 };
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ ...box, background: 'var(--surface-sunken)' }}>
+        <div style={small}>
+          Honest summary of what's <i>actually</i> computed today vs. what's shown as placeholder. Source: <code>src/app.jsx</code>.
+        </div>
+      </div>
+
+      <div style={box}>
+        <div style={h}>1 · Symptoms score (computed)</div>
+        <div style={small}>
+          Comes from the morning check-in (sleep / soreness / pain). Range <b>20–99</b>. Defined in <code>computeSymptoms()</code> at <code>src/app.jsx:1519</code>.
+        </div>
+        <div style={code}>{
+`symptoms = clamp(
+  86
+  + (sleep    − 4) × 4     // sleep:    1–5 faces, 4 = baseline ("good")
+  − (soreness − 2) × 6     // soreness: 1–5 faces, 2 = baseline ("light")
+  − painIndex × 16,        // None=0, Mild=1, Strong=2
+  20, 99
+)`}</div>
+        <div style={small}>
+          So a worst-case day (sleep 1, soreness 5, strong pain) yields ≈ 20; a perfect day (sleep 5, soreness 1, no pain) caps at 99.
+        </div>
+      </div>
+
+      <div style={box}>
+        <div style={h}>2 · RunReady score (computed)</div>
+        <div style={small}>
+          The big number on the Today screen. Range <b>0–100</b>. Currently a linear projection from the symptoms score around a fixed baseline of 62. Defined in <code>App.saveCheckin()</code> at <code>src/app.jsx:1613</code>.
+        </div>
+        <div style={code}>{
+`runReady = clamp(
+  62 + (symptoms − 86) × 0.45,
+  0, 100
+)`}</div>
+        <div style={small}>
+          The 62 baseline reflects the placeholder Cardio (78) and Biomech (54) demo scores blended; before any check-in we just display 62. The check-in nudges it ±. A real implementation would replace the constant with <code>0.5 × cardio + 0.5 × biomech</code> and weight symptoms in.
+        </div>
+      </div>
+
+      <div style={box}>
+        <div style={h}>3 · Cardiovascular score (demo · not yet computed)</div>
+        <div style={small}>
+          Today this is a hard-coded value of <b>78</b> with placeholder sub-metrics (HRV 62 ms, RHR 48 bpm, training load 69, decoupling 6.1%, VO₂max 52 ml/kg). See <code>CARDIO</code> at <code>src/app.jsx:287</code>. No live sensor or watch integration writes to it yet.
+        </div>
+        <div style={small}>
+          <b>Intended formula</b> (per the spec the UI was designed against):
+        </div>
+        <div style={code}>{
+`cardio = weightedMean(
+  HRV_readiness,          // 7-day rMSSD vs personal baseline
+  resting_HR_inverse,     // lower = better, normalised to age/sex
+  training_load,          // ACWR sweet-spot 0.8–1.3
+  decoupling_inverse,     // pace:HR drift % over Zone 2 effort
+  VO2max_trend            // 8-week estimate
+)  // each input normalised 0–100, equal weights in v1`}</div>
+        <div style={small}>
+          Source data would come from: imported runs (<code>runs</code> table — already populated by Garmin TCX/GPX import), and a future wearable sync for HRV/RHR.
+        </div>
+      </div>
+
+      <div style={box}>
+        <div style={h}>4 · Biomechanical score (demo · not yet computed)</div>
+        <div style={small}>
+          Today this is hard-coded to <b>54</b> with placeholder gait params. See <code>BIOMECH</code> at <code>src/app.jsx:304</code>. The strap that would feed real cadence/GCT/valgus/etc. is unbuilt.
+        </div>
+        <div style={small}><b>Intended formula:</b></div>
+        <div style={code}>{
+`biomech = 100 − sum(penalty(param) for each gait param)
+
+penalty(cadence)            : −0.4 per spm below 175 (cap 12)
+penalty(ground_contact)     : −0.3 per ms above 230   (cap 14)
+penalty(knee_valgus)        : −1.2 per ° above  6     (cap 18) ★ limiter
+penalty(pelvic_drop)        : −1.0 per ° above  6     (cap 14) ★ limiter
+penalty(overstride)         : −5 if "High"
+
+Any param with flag:true is a "limiter" and gets weighted ×1.5.`}</div>
+        <div style={small}>
+          Source data would come from a Pulseform strap (IMU + foot-contact sensors). Pose-from-video is the bridge: the <code>videos</code> table already stores user-recorded gait clips for future analysis.
+        </div>
+      </div>
+
+      <div style={box}>
+        <div style={h}>5 · Stored vs derived</div>
+        <div style={small}>
+          What lives in Postgres vs what's recomputed on read:
+        </div>
+        <div style={code}>{
+`STORED  (write-once per check-in, in 'checkins' table):
+  sleep, soreness, pain (raw inputs)
+  symptoms   ← computeSymptoms(c)       at submit time
+  run_ready  ← clamp(62+(sym−86)×0.45)  at submit time
+
+STORED  (write-once per run, in 'runs' table):
+  source, started_at, distance_m, duration_s,
+  avg_hr, max_hr, avg_cadence, avg_gct, avg_vo (parsed from TCX/GPX)
+
+DERIVED (recomputed each render, never stored):
+  cardio / biomech sub-scores  — currently constants
+  pace per km                  — from distance_m / duration_s
+  readyTone & badgeText        — from runReady thresholds (≥67 ready, ≥40 caution)`}</div>
+      </div>
+
+      <div style={box}>
+        <div style={h}>6 · Limits of this admin tool</div>
+        <div style={small}>
+          • Suspension blocks login and the next <code>/api/me</code>, but an active session JWT remains valid for up to 30 days. There's no server-side revocation list yet — for instant kick-out we'd need to add a session-version column.<br/>
+          • Reset-password updates the hash but does <i>not</i> log other devices out (same reason).<br/>
+          • "Push to all" sends to every <code>push_subscriptions</code> row, regardless of suspended status (suspended users keep their sub until they reinstall).<br/>
+          • Cardio / Biomech demo numbers are global constants — they don't differ per user. The Formulas tab is the source of truth for what's real vs visual.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminPanel({ user, onExit }) {
+  const [view, setView] = useState('dashboard');
+  const [userId, setUserId] = useState(null);
+  // Picking a user from the users list jumps into the detail sub-view.
+  const handlePick = (id) => { setUserId(id); setView('user'); };
+  return (
+    <AdminShell user={user} onExit={onExit} view={view === 'user' ? 'users' : view} setView={(v) => { setUserId(null); setView(v); }}>
+      {view === 'dashboard' && <AdminDashboard />}
+      {view === 'users'     && <AdminUsers onPick={handlePick} />}
+      {view === 'user'      && userId && (
+        <AdminUserDetail userId={userId} onBack={() => { setUserId(null); setView('users'); }} />
+      )}
+      {view === 'push'      && <AdminPushComposer />}
+      {view === 'formulas'  && <AdminFormulas />}
+    </AdminShell>
+  );
+}
+
 function App() {
   const [booting, setBooting] = useState(true);
   const [phase, setPhase] = useState('welcome');       // welcome | login | onboarding | app
@@ -1543,6 +1989,14 @@ function App() {
   const [checkin, setCheckin] = useState(null);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [hash, setHash] = useState(typeof window !== 'undefined' ? window.location.hash : '');
+
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const exitAdmin = () => { history.replaceState(null, '', window.location.pathname + window.location.search); setHash(''); };
 
   const symptoms = checkin ? checkin.symptoms : 86;
   const runReady = checkin ? checkin.runReady : 62;
@@ -1629,6 +2083,7 @@ function App() {
   else if (phase === 'welcome') screen = <Welcome onStart={() => setPhase('onboarding')} onLogin={() => setPhase('login')} />;
   else if (phase === 'login') screen = <Login onLogin={doLogin} onBack={() => setPhase('welcome')} onCreate={() => setPhase('onboarding')} />;
   else if (phase === 'onboarding') screen = <Onboarding profile={profile} setProfile={setProfile} authed={!!user} onFinish={finishOnboarding} onExit={() => (user ? logout() : setPhase('welcome'))} />;
+  else if (hash === '#admin' && user?.role === 'admin') screen = <AdminPanel user={user} onExit={exitAdmin} />;
   else {
     const tabs = {
       today: <Today profile={profile} checkin={checkin} runReady={runReady} symptoms={symptoms}
