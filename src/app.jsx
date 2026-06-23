@@ -1098,18 +1098,99 @@ function VideoAnalysis() {
   );
 }
 
-/* ---- Garmin / device run import (used on the You screen) ---- */
+/* ---- Apple Health XML parser (browser-side streaming) ----
+   Apple Health exports run 50–500 MB, so we read the file in chunks
+   instead of loading it all at once. We only care about a handful of
+   record types (HRV / RHR / sleep / steps / weight); per-day rollups
+   get posted as a tiny JSON summary to /api/import?action=daily-metrics.
+   Note on units: Apple's HRV record is SDNN, not rMSSD — we store the
+   raw ms value in the hrv_rmssd column and label the source so the
+   Formulas tab stays honest. */
+async function parseAppleHealthXml(file, onProgress) {
+  const CHUNK = 4 * 1024 * 1024;
+  const days = new Map();
+  const dayOf = (s) => (s ? String(s).slice(0, 10) : null);
+  const toDate = (s) => new Date(String(s).replace(' ', 'T').replace(' ', ''));
+  const dayBucket = (d) => {
+    if (!days.has(d)) days.set(d, { hrv: [], rhr: [], steps: 0, sleepMin: 0, weight: null });
+    return days.get(d);
+  };
+  const attr = (rec, k) => {
+    const m = rec.match(new RegExp('\\b' + k + '="([^"]*)"'));
+    return m ? m[1] : null;
+  };
+
+  let buf = '';
+  let offset = 0;
+  while (offset < file.size) {
+    const slice = file.slice(offset, offset + CHUNK);
+    buf += await slice.text();
+    let lastEnd = 0;
+    const re = /<Record\b[^>]*\/?>/g;
+    let m;
+    while ((m = re.exec(buf)) !== null) {
+      const rec = m[0];
+      lastEnd = m.index + rec.length;
+      const type = attr(rec, 'type');
+      const start = attr(rec, 'startDate');
+      const day = dayOf(start);
+      if (!type || !day) continue;
+      const value = attr(rec, 'value');
+      if (type === 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN') {
+        const v = parseFloat(value); if (v > 0) dayBucket(day).hrv.push(v);
+      } else if (type === 'HKQuantityTypeIdentifierRestingHeartRate') {
+        const v = parseFloat(value); if (v > 0) dayBucket(day).rhr.push(v);
+      } else if (type === 'HKQuantityTypeIdentifierStepCount') {
+        const v = parseFloat(value); if (v > 0) dayBucket(day).steps += v;
+      } else if (type === 'HKQuantityTypeIdentifierBodyMass') {
+        const v = parseFloat(value);
+        if (v > 0) {
+          const unit = (attr(rec, 'unit') || '').toLowerCase();
+          dayBucket(day).weight = unit === 'lb' ? v * 0.45359237 : v;
+        }
+      } else if (type === 'HKCategoryTypeIdentifierSleepAnalysis' && /asleep/i.test(value || '')) {
+        const end = attr(rec, 'endDate');
+        if (end) {
+          const ms = toDate(end) - toDate(start);
+          if (ms > 0 && ms < 24 * 3600 * 1000) dayBucket(day).sleepMin += ms / 60000;
+        }
+      }
+    }
+    buf = buf.slice(lastEnd);
+    offset += CHUNK;
+    if (onProgress) onProgress(Math.min(1, offset / file.size));
+  }
+
+  const out = [];
+  for (const [day, d] of days.entries()) {
+    const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
+    const row = { day };
+    if (d.hrv.length)   row.hrv_rmssd     = mean(d.hrv);   // really SDNN ms — see note above
+    if (d.rhr.length)   row.resting_hr    = mean(d.rhr);
+    if (d.steps > 0)    row.steps         = d.steps;
+    if (d.sleepMin > 0) row.sleep_minutes = d.sleepMin;
+    if (d.weight)       row.weight_kg     = d.weight;
+    if (Object.keys(row).length > 1) out.push(row);
+  }
+  out.sort((a, b) => a.day.localeCompare(b.day));
+  return out;
+}
+
+/* ---- Device data import (runs + Apple Health) ---- */
 function ImportRuns() {
   const [runs, setRuns] = useState([]);
-  const [status, setStatus] = useState(null);
-  const inputRef = React.useRef(null);
+  const [runStatus, setRunStatus] = useState(null);
+  const [healthStatus, setHealthStatus] = useState(null);
+  const runRef = React.useRef(null);
+  const healthRef = React.useRef(null);
   const load = async () => { const r = await api('/runs'); if (r.ok) setRuns(r.data.runs || []); };
   useEffect(() => { load(); }, []);
-  const onFile = async (e) => {
+
+  const onRunFile = async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    setStatus(`Importing ${file.name}…`);
+    setRunStatus(`Importing ${file.name}…`);
     try {
       const buf = await file.arrayBuffer();
       const res = await fetch(`/api/import?name=${encodeURIComponent(file.name)}`, {
@@ -1117,22 +1198,58 @@ function ImportRuns() {
         headers: { 'Content-Type': 'application/octet-stream' }, body: buf,
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.run) { setStatus(`Imported ${(+data.run.distance_m / 1000).toFixed(1)} km`); load(); }
-      else setStatus(data.error || 'Could not import that file.');
-    } catch (err) { setStatus('Could not read that file.'); }
+      if (res.ok && data.run) { setRunStatus(`Imported ${(+data.run.distance_m / 1000).toFixed(1)} km`); load(); }
+      else setRunStatus(data.error || 'Could not import that file.');
+    } catch (err) { setRunStatus('Could not read that file.'); }
   };
+
+  const onHealthFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (/\.zip$/i.test(file.name)) {
+      setHealthStatus('Unzip export.zip first, then upload export.xml.');
+      return;
+    }
+    setHealthStatus(`Parsing ${(file.size / 1024 / 1024).toFixed(0)} MB…`);
+    try {
+      const metrics = await parseAppleHealthXml(file, (p) => {
+        setHealthStatus(`Parsing ${Math.round(p * 100)}%…`);
+      });
+      if (!metrics.length) { setHealthStatus('No supported records found in that file.'); return; }
+      setHealthStatus(`Uploading ${metrics.length} days…`);
+      const res = await fetch('/api/import?action=daily-metrics', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'apple-health', metrics }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setHealthStatus(`Saved ${data.days} day${data.days === 1 ? '' : 's'} of HRV / sleep / RHR / steps.`);
+      else setHealthStatus(data.error || 'Could not save those metrics.');
+    } catch (err) { setHealthStatus('Could not read that file: ' + (err.message || err)); }
+  };
+
   return (
     <>
       <div className="pf-section-label rise" style={{ '--d': '.18s' }}>Devices &amp; data</div>
       <div className="pf-list rise" style={{ '--d': '.2s' }}>
-        <div className="pf-list__row" onClick={() => inputRef.current && inputRef.current.click()} style={{ cursor: 'pointer' }}>
+        <div className="pf-list__row" onClick={() => runRef.current && runRef.current.click()} style={{ cursor: 'pointer' }}>
           <span className="pf-list__ic"><Icon name="activity" size={18} /></span>
           <div className="pf-list__body">
             <div className="pf-list__t">Import a run</div>
-            <div className="pf-list__d">{status || 'Garmin export · .fit / .tcx / .gpx'}</div>
+            <div className="pf-list__d">{runStatus || 'Garmin · Coros · Suunto · Polar · Wahoo · .fit / .tcx / .gpx'}</div>
           </div>
           <Icon name="plus" size={18} className="pf-drill__chev" />
-          <input ref={inputRef} type="file" accept=".fit,.tcx,.gpx" style={{ display: 'none' }} onChange={onFile} />
+          <input ref={runRef} type="file" accept=".fit,.tcx,.gpx" style={{ display: 'none' }} onChange={onRunFile} />
+        </div>
+        <div className="pf-list__row" onClick={() => healthRef.current && healthRef.current.click()} style={{ cursor: 'pointer' }}>
+          <span className="pf-list__ic"><Icon name="heart" size={18} /></span>
+          <div className="pf-list__body">
+            <div className="pf-list__t">Import wearable data</div>
+            <div className="pf-list__d">{healthStatus || 'Apple Health export.xml · HRV · resting HR · sleep · steps · weight'}</div>
+          </div>
+          <Icon name="plus" size={18} className="pf-drill__chev" />
+          <input ref={healthRef} type="file" accept=".xml,.zip" style={{ display: 'none' }} onChange={onHealthFile} />
         </div>
         {runs.map((r) => (
           <div className="pf-list__row" key={r.id}>
@@ -1624,6 +1741,7 @@ function AdminDashboard() {
         <AdminStatTile label="Check-ins today" value={s.checkins_today} sub={`${s.checkins_total} total`} />
         <AdminStatTile label="Runs imported" value={s.runs} />
         <AdminStatTile label="Videos" value={s.videos} />
+        <AdminStatTile label="Wearable days" value={s.daily_metrics ?? 0} sub="HRV / sleep / RHR / steps" />
         <AdminStatTile label="Push subscriptions" value={s.push_subscriptions} sub="across all devices" />
         <AdminStatTile label="Engagement" value={`${s.users ? Math.round(100 * s.checkins_today / s.users) : 0}%`} sub="checked in today" />
       </div>
@@ -1835,6 +1953,26 @@ function AdminUserDetail({ userId, onBack, onChanged }) {
             </div>
           ))}
           {!d.runs.length && <div style={{ color: 'var(--text-muted)' }}>No runs.</div>}
+        </div>
+      </details>
+
+      <details style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 12 }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Wearable daily metrics ({(d.daily_metrics || []).length})</summary>
+        <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 12 }}>
+          {(d.daily_metrics || []).map(m => (
+            <div key={m.day} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', background: 'var(--surface-sunken)', borderRadius: 8 }}>
+              <div>
+                <b>{m.day}</b>
+                {m.sleep_minutes != null ? ` · sleep ${Math.round(m.sleep_minutes / 6) / 10}h` : ''}
+                {m.hrv_rmssd     != null ? ` · HRV ${Math.round(+m.hrv_rmssd)} ms` : ''}
+                {m.resting_hr    != null ? ` · RHR ${m.resting_hr} bpm` : ''}
+                {m.steps         != null ? ` · ${Number(m.steps).toLocaleString()} steps` : ''}
+                {m.weight_kg     != null ? ` · ${Number(m.weight_kg).toFixed(1)} kg` : ''}
+              </div>
+              <div style={{ color: 'var(--text-faint)' }}>{m.source}</div>
+            </div>
+          ))}
+          {!(d.daily_metrics || []).length && <div style={{ color: 'var(--text-muted)' }}>No wearable data imported yet.</div>}
         </div>
       </details>
 

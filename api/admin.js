@@ -37,7 +37,7 @@ const qid = (req) => (req.query && req.query.id) || '';
 // ---- Dashboard ----------------------------------------------------------
 
 async function stats(req, res) {
-  const [users, profiles, checkinsToday, checkinsTotal, runs, videos, subs, suspended, admins, signupSeries] = await Promise.all([
+  const [users, profiles, checkinsToday, checkinsTotal, runs, videos, subs, suspended, admins, signupSeries, daily] = await Promise.all([
     db.query('select count(*)::int as n from users'),
     db.query('select count(*)::int as n from profiles where onboarded = true'),
     db.query('select count(*)::int as n from checkins where day = current_date'),
@@ -58,6 +58,7 @@ async function stats(req, res) {
          group by 1
        ) s on s.day = d::date
        order by d`),
+    db.query(`select count(*)::int as n from daily_metrics`).catch(() => ({ rows: [{ n: 0 }] })),
   ]);
   return json(res, 200, {
     users: users.rows[0].n,
@@ -66,6 +67,7 @@ async function stats(req, res) {
     checkins_total: checkinsTotal.rows[0].n,
     runs: runs.rows[0].n,
     videos: videos.rows[0].n,
+    daily_metrics: daily.rows[0].n,
     push_subscriptions: subs.rows[0].n,
     suspended: suspended.rows[0].n,
     admins: admins.rows[0].n,
@@ -111,7 +113,7 @@ async function userDetail(req, res) {
      from users where id = $1`, [id]);
   if (!u.rowCount) return json(res, 404, { error: 'User not found.' });
 
-  const [profile, checkins, runs, videos, subs] = await Promise.all([
+  const [profile, checkins, runs, videos, subs, metrics] = await Promise.all([
     db.query(
       `select name, sex, age, height, weight, rest_hr, experience, weekly, goal, injuries, pain, onboarded, updated_at
        from profiles where user_id = $1`, [id]),
@@ -127,6 +129,10 @@ async function userDetail(req, res) {
        from videos where user_id = $1 order by recorded_at desc limit 30`, [id])
         .catch(() => ({ rows: [] })),
     db.query('select count(*)::int as n from push_subscriptions where user_id = $1', [id]),
+    db.query(
+      `select day, sleep_minutes, hrv_rmssd, resting_hr, steps, weight_kg, source, updated_at
+       from daily_metrics where user_id = $1 order by day desc limit 30`, [id])
+        .catch(() => ({ rows: [] })),
   ]);
 
   return json(res, 200, {
@@ -135,6 +141,7 @@ async function userDetail(req, res) {
     checkins: checkins.rows,
     runs: runs.rows,
     videos: videos.rows,
+    daily_metrics: metrics.rows,
     push_subscriptions: subs.rows[0].n,
   });
 }

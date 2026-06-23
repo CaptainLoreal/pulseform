@@ -1,11 +1,50 @@
 const db = require('../lib/db');
 const { getUser } = require('../lib/auth');
-const { json } = require('../lib/http');
+const { json, readBody } = require('../lib/http');
 const { ensureRuns } = require('../lib/runs');
 
 const num = (x) => { const n = parseFloat(x); return Number.isNaN(n) ? null : n; };
 const arr = (x) => (x == null ? [] : Array.isArray(x) ? x : [x]);
 const round1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
+const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+
+// Daily wellness metrics, uploaded as a pre-aggregated JSON summary.
+// The browser parses huge Apple Health / Garmin / generic CSV exports
+// client-side (one file can be hundreds of MB), then POSTs us a small
+// per-day rollup — keeps us well under the Vercel 4.5 MB body cap and
+// 10 s function timeout.
+async function importDailyMetrics(req, res, sess) {
+  const body = await readBody(req);
+  const source = String(body.source || 'unknown').slice(0, 40);
+  const metrics = Array.isArray(body.metrics) ? body.metrics : [];
+  if (!metrics.length) return json(res, 400, { error: 'No daily metrics in payload.' });
+  if (metrics.length > 1500) return json(res, 400, { error: 'Too many days at once (max 1500 ≈ 4 yrs).' });
+
+  let written = 0;
+  for (const m of metrics) {
+    if (!isDay(m.day)) continue;
+    const sleep = m.sleep_minutes != null ? Math.round(+m.sleep_minutes) : null;
+    const hrv   = m.hrv_rmssd     != null ? round1(+m.hrv_rmssd)         : null;
+    const rhr   = m.resting_hr    != null ? Math.round(+m.resting_hr)    : null;
+    const steps = m.steps         != null ? Math.round(+m.steps)         : null;
+    const wt    = m.weight_kg     != null ? round1(+m.weight_kg)         : null;
+    if (sleep == null && hrv == null && rhr == null && steps == null && wt == null) continue;
+    await db.query(
+      `insert into daily_metrics (user_id, day, sleep_minutes, hrv_rmssd, resting_hr, steps, weight_kg, source)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
+       on conflict (user_id, day) do update set
+         sleep_minutes = coalesce(excluded.sleep_minutes, daily_metrics.sleep_minutes),
+         hrv_rmssd     = coalesce(excluded.hrv_rmssd,     daily_metrics.hrv_rmssd),
+         resting_hr    = coalesce(excluded.resting_hr,    daily_metrics.resting_hr),
+         steps         = coalesce(excluded.steps,         daily_metrics.steps),
+         weight_kg     = coalesce(excluded.weight_kg,     daily_metrics.weight_kg),
+         source        = excluded.source,
+         updated_at    = now()`,
+      [sess.uid, m.day, sleep, hrv, rhr, steps, wt, source]);
+    written++;
+  }
+  return json(res, 200, { ok: true, days: written, source });
+}
 
 async function readRaw(req) {
   if (Buffer.isBuffer(req.body)) return req.body;
@@ -103,6 +142,8 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const sess = getUser(req);
   if (!sess) return json(res, 401, { error: 'Not signed in.' });
+  const action = (req.query && req.query.action) || '';
+  if (action === 'daily-metrics') return importDailyMetrics(req, res, sess);
   try {
     const name = ((req.query && req.query.name) || 'run').toLowerCase();
     const buf = await readRaw(req);
