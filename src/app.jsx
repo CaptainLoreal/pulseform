@@ -686,7 +686,6 @@ function Today({ profile, checkin, runReady, symptoms, goForm, goCardio, openChe
             <span className="pf-eyebrow">{dayName} · Easy week</span>
             <h2 className="pf-apphead__title">{greeting}, {first}</h2>
           </div>
-          <Avatar name={profile.name || 'Jordan Diaz'} />
         </header>
 
         <Card className={cx('pf-scorecard', `pf-scorecard--${readyTone}`, 'rise')} style={{ '--d': '.05s' }}>

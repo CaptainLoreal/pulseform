@@ -176,7 +176,9 @@ body {
    --------------------------------------------------------------- */
 .pf-tabbar {
   position: absolute; left: 0; right: 0; bottom: 0;
-  height: 84px; padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 6px);
+  /* Bar height now hugs its content; safe-area inset (iPhone home indicator)
+     is the only thing that extends the bar downward on PWA installs. */
+  padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 8px);
   display: grid; grid-template-columns: repeat(4, 1fr);
   background: rgba(255,255,255,0.86);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
