@@ -1175,13 +1175,15 @@ async function parseAppleHealthXml(file, onProgress) {
   return out;
 }
 
-/* ---- Device data import (runs + Apple Health) ---- */
+/* ---- Device data import (runs + Open Wearables + Apple Health) ---- */
 function ImportRuns() {
   const [runs, setRuns] = useState([]);
   const [runStatus, setRunStatus] = useState(null);
   const [healthStatus, setHealthStatus] = useState(null);
+  const [owStatus, setOwStatus] = useState(null);
   const runRef = React.useRef(null);
   const healthRef = React.useRef(null);
+  const owRef = React.useRef(null);
   const load = async () => { const r = await api('/runs'); if (r.ok) setRuns(r.data.runs || []); };
   useEffect(() => { load(); }, []);
 
@@ -1200,6 +1202,38 @@ function ImportRuns() {
       if (res.ok && data.run) { setRunStatus(`Imported ${(+data.run.distance_m / 1000).toFixed(1)} km`); load(); }
       else setRunStatus(data.error || 'Could not import that file.');
     } catch (err) { setRunStatus('Could not read that file.'); }
+  };
+
+  const onOwFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setOwStatus(`Reading ${file.name}…`);
+    try {
+      const text = await file.text();
+      let payload;
+      try { payload = JSON.parse(text); }
+      catch { setOwStatus('That file is not valid JSON.'); return; }
+      setOwStatus('Importing…');
+      const res = await fetch('/api/import?action=open-wearables', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const parts = [];
+        if (data.workouts)            parts.push(`${data.workouts} workout${data.workouts === 1 ? '' : 's'}`);
+        if (data.sleep_sessions)      parts.push(`${data.sleep_sessions} sleep day${data.sleep_sessions === 1 ? '' : 's'}`);
+        if (data.activity_summaries)  parts.push(`${data.activity_summaries} activity day${data.activity_summaries === 1 ? '' : 's'}`);
+        if (data.recovery_summaries)  parts.push(`${data.recovery_summaries} recovery day${data.recovery_summaries === 1 ? '' : 's'}`);
+        if (data.body_summary)        parts.push(`body summary`);
+        setOwStatus('Saved ' + (parts.join(', ') || 'nothing new') + '.');
+        load();
+      } else {
+        setOwStatus(data.error || 'Could not import that file.');
+      }
+    } catch (err) { setOwStatus('Could not read that file: ' + (err.message || err)); }
   };
 
   const onHealthFile = async (e) => {
@@ -1241,11 +1275,20 @@ function ImportRuns() {
           <Icon name="plus" size={18} className="pf-drill__chev" />
           <input ref={runRef} type="file" accept=".fit,.tcx,.gpx" style={{ display: 'none' }} onChange={onRunFile} />
         </div>
+        <div className="pf-list__row" onClick={() => owRef.current && owRef.current.click()} style={{ cursor: 'pointer' }}>
+          <span className="pf-list__ic"><Icon name="cpu" size={18} /></span>
+          <div className="pf-list__body">
+            <div className="pf-list__t">Import Open Wearables JSON</div>
+            <div className="pf-list__d">{owStatus || 'openwearables.io export · workouts · sleep · activity · recovery · body'}</div>
+          </div>
+          <Icon name="plus" size={18} className="pf-drill__chev" />
+          <input ref={owRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onOwFile} />
+        </div>
         <div className="pf-list__row" onClick={() => healthRef.current && healthRef.current.click()} style={{ cursor: 'pointer' }}>
           <span className="pf-list__ic"><Icon name="heart" size={18} /></span>
           <div className="pf-list__body">
-            <div className="pf-list__t">Import wearable data</div>
-            <div className="pf-list__d">{healthStatus || 'Apple Health export.xml · HRV · resting HR · sleep · steps · weight'}</div>
+            <div className="pf-list__t">Import Apple Health export</div>
+            <div className="pf-list__d">{healthStatus || 'export.xml · HRV · resting HR · sleep · steps · weight'}</div>
           </div>
           <Icon name="plus" size={18} className="pf-drill__chev" />
           <input ref={healthRef} type="file" accept=".xml,.zip" style={{ display: 'none' }} onChange={onHealthFile} />

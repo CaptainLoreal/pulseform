@@ -138,12 +138,182 @@ function parseFit(buf) {
   });
 }
 
+// Open Wearables (openwearables.io) JSON import.
+// Accepts the project's canonical schemas verbatim — paste a raw API
+// response or a hand-assembled bundle, both work. We mirror the OW
+// field names exactly so users don't need to translate anything.
+//
+// Supported shapes:
+//   1. Bundle:   { workouts: [...], sleep_sessions: [...], activity_summaries: [...],
+//                  recovery_summaries: [...], body_summary: {...} }
+//   2. Paginated response: { data: [...], pagination, metadata }
+//      → record type inferred from the first item.
+//   3. Bare array of records: [...] → record type inferred from the first item.
+//
+// OW → Pulseform mapping:
+//   Workout (running / >1km) → runs row
+//   SleepSession             → daily_metrics.sleep_minutes (bucketed by start_time)
+//   ActivitySummary          → daily_metrics.steps
+//   RecoverySummary          → daily_metrics.sleep_minutes / hrv_rmssd / resting_hr
+//                              (we store SDNN ms in the hrv_rmssd column — same
+//                              compromise as Apple Health; flagged in Formulas tab)
+//   BodySummary              → daily_metrics.weight_kg (today's row, latest reading)
+const RUN_TYPES = new Set([
+  'running', 'run', 'trail_running', 'treadmill_running', 'jogging', 'walking', 'hiking',
+]);
+
+function classify(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  if (rec.type && rec.start_time && rec.end_time)                                return 'workouts';
+  if (rec.start_time && rec.end_time && 'sleep_duration_seconds' in rec)         return 'sleep_sessions';
+  if (rec.start_time && rec.end_time && 'efficiency_percent' in rec)             return 'sleep_sessions';
+  if (rec.date && ('avg_hrv_sdnn_ms' in rec || 'recovery_score' in rec
+                || 'resting_heart_rate_bpm' in rec))                             return 'recovery_summaries';
+  if (rec.date && ('steps' in rec || 'active_minutes' in rec
+                || 'intensity_minutes' in rec))                                  return 'activity_summaries';
+  if (rec.slow_changing || rec.averaged || rec.latest)                           return 'body_summary';
+  return null;
+}
+
+function bundleFromArray(items) {
+  const out = {};
+  for (const it of items) {
+    const kind = classify(it);
+    if (!kind) continue;
+    if (kind === 'body_summary') { out.body_summary = it; continue; }
+    (out[kind] = out[kind] || []).push(it);
+  }
+  return out;
+}
+
+const dayOfTs = (ts) => ts ? String(ts).slice(0, 10) : null;
+
+async function upsertDaily(uid, day, patch, source) {
+  if (!isDay(day)) return false;
+  const keys = Object.keys(patch).filter(k => patch[k] != null);
+  if (!keys.length) return false;
+  await db.query(
+    `insert into daily_metrics (user_id, day, sleep_minutes, hrv_rmssd, resting_hr, steps, weight_kg, source)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)
+     on conflict (user_id, day) do update set
+       sleep_minutes = coalesce(excluded.sleep_minutes, daily_metrics.sleep_minutes),
+       hrv_rmssd     = coalesce(excluded.hrv_rmssd,     daily_metrics.hrv_rmssd),
+       resting_hr    = coalesce(excluded.resting_hr,    daily_metrics.resting_hr),
+       steps         = coalesce(excluded.steps,         daily_metrics.steps),
+       weight_kg     = coalesce(excluded.weight_kg,     daily_metrics.weight_kg),
+       source        = excluded.source,
+       updated_at    = now()`,
+    [uid, day,
+     patch.sleep_minutes != null ? Math.round(patch.sleep_minutes) : null,
+     patch.hrv_rmssd     != null ? round1(patch.hrv_rmssd)         : null,
+     patch.resting_hr    != null ? Math.round(patch.resting_hr)    : null,
+     patch.steps         != null ? Math.round(patch.steps)         : null,
+     patch.weight_kg     != null ? round1(patch.weight_kg)         : null,
+     source]);
+  return true;
+}
+
+async function ingestWorkouts(uid, items, srcLabel) {
+  await ensureRuns();
+  let n = 0;
+  for (const w of items) {
+    if (!w || !w.start_time) continue;
+    const t = String(w.type || '').toLowerCase().replace(/\s+/g, '_');
+    const dist = w.distance_meters != null ? +w.distance_meters : null;
+    if (!RUN_TYPES.has(t) && !(dist && dist > 1000)) continue;  // skip non-cardio
+    const provider = (w.source && w.source.provider) || 'open-wearables';
+    await db.query(
+      `insert into runs (user_id, source, started_at, distance_m, duration_s,
+                         avg_hr, max_hr, avg_cadence, avg_gct, avg_vo, filename)
+       values ($1,$2,$3,$4,$5,$6,$7,null,null,null,$8)`,
+      [uid, `ow:${provider}`, w.start_time, dist,
+       w.duration_seconds != null ? +w.duration_seconds : null,
+       w.avg_heart_rate_bpm != null ? +w.avg_heart_rate_bpm : null,
+       w.max_heart_rate_bpm != null ? +w.max_heart_rate_bpm : null,
+       w.id || w.name || 'open-wearables.json']);
+    n++;
+  }
+  return n;
+}
+
+async function ingestSleepSessions(uid, items, srcLabel) {
+  const perDay = new Map();
+  for (const s of items) {
+    if (s.is_nap) continue;
+    const day = dayOfTs(s.start_time);
+    if (!day) continue;
+    const mins = s.sleep_duration_seconds != null ? +s.sleep_duration_seconds / 60
+              : s.duration_seconds       != null ? +s.duration_seconds       / 60 : 0;
+    perDay.set(day, (perDay.get(day) || 0) + mins);
+  }
+  let n = 0;
+  for (const [day, m] of perDay) if (await upsertDaily(uid, day, { sleep_minutes: m }, srcLabel)) n++;
+  return n;
+}
+
+async function ingestActivitySummaries(uid, items, srcLabel) {
+  let n = 0;
+  for (const a of items) {
+    const ok = await upsertDaily(uid, a.date, { steps: a.steps }, srcLabel);
+    if (ok) n++;
+  }
+  return n;
+}
+
+async function ingestRecoverySummaries(uid, items, srcLabel) {
+  let n = 0;
+  for (const r of items) {
+    const ok = await upsertDaily(uid, r.date, {
+      sleep_minutes: r.sleep_duration_seconds != null ? +r.sleep_duration_seconds / 60 : null,
+      hrv_rmssd:     r.avg_hrv_sdnn_ms        != null ? +r.avg_hrv_sdnn_ms              : null,
+      resting_hr:    r.resting_heart_rate_bpm != null ? +r.resting_heart_rate_bpm       : null,
+    }, srcLabel);
+    if (ok) n++;
+  }
+  return n;
+}
+
+async function ingestBodySummary(uid, body, srcLabel) {
+  const wt = body && body.slow_changing && body.slow_changing.weight_kg;
+  if (wt == null) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  return await upsertDaily(uid, today, { weight_kg: +wt }, srcLabel) ? 1 : 0;
+}
+
+async function importOpenWearables(req, res, sess) {
+  const body = await readBody(req);
+  if (!body || typeof body !== 'object') return json(res, 400, { error: 'Expected a JSON object or array.' });
+
+  let bundle;
+  if (Array.isArray(body))                              bundle = bundleFromArray(body);
+  else if (Array.isArray(body.data))                    bundle = bundleFromArray(body.data);
+  else if (body.workouts || body.sleep_sessions || body.activity_summaries
+        || body.recovery_summaries || body.body_summary) bundle = body;
+  else                                                   bundle = bundleFromArray([body]);
+
+  const srcLabel = 'open-wearables';
+  const out = { ok: true, workouts: 0, sleep_sessions: 0, activity_summaries: 0, recovery_summaries: 0, body_summary: 0 };
+  try {
+    if (Array.isArray(bundle.workouts))            out.workouts            = await ingestWorkouts(sess.uid, bundle.workouts, srcLabel);
+    if (Array.isArray(bundle.sleep_sessions))      out.sleep_sessions      = await ingestSleepSessions(sess.uid, bundle.sleep_sessions, srcLabel);
+    if (Array.isArray(bundle.activity_summaries))  out.activity_summaries  = await ingestActivitySummaries(sess.uid, bundle.activity_summaries, srcLabel);
+    if (Array.isArray(bundle.recovery_summaries))  out.recovery_summaries  = await ingestRecoverySummaries(sess.uid, bundle.recovery_summaries, srcLabel);
+    if (bundle.body_summary)                       out.body_summary        = await ingestBodySummary(sess.uid, bundle.body_summary, srcLabel);
+  } catch (e) {
+    return json(res, 500, { error: 'Open Wearables import failed.', detail: String(e.message || e), partial: out });
+  }
+  const touched = out.workouts + out.sleep_sessions + out.activity_summaries + out.recovery_summaries + out.body_summary;
+  if (!touched) return json(res, 400, { error: 'No recognised Open Wearables records found.' });
+  return json(res, 200, out);
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const sess = getUser(req);
   if (!sess) return json(res, 401, { error: 'Not signed in.' });
   const action = (req.query && req.query.action) || '';
-  if (action === 'daily-metrics') return importDailyMetrics(req, res, sess);
+  if (action === 'daily-metrics')   return importDailyMetrics(req, res, sess);
+  if (action === 'open-wearables')  return importOpenWearables(req, res, sess);
   try {
     const name = ((req.query && req.query.name) || 'run').toLowerCase();
     const buf = await readRaw(req);
